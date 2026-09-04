@@ -244,7 +244,7 @@ def extract_runs_and_writes_utf8():
     assert "This content downloaded" not in md
     meta = json.loads((out / "meta.json").read_text(encoding="utf-8"))  # cp949면 여기서 깨진다
     assert meta["figures"] == 1 and meta["coverage"] >= 0.97, meta
-    assert meta["extractor"] in ("kordoc", "pymupdf4llm"), meta
+    assert meta["extractor"] in ("kordoc", "columns", "pymupdf4llm"), meta
 
 
 @test
@@ -264,6 +264,18 @@ def verify_checks_are_strict():
     counted = "네 가지 조건이 있다."
     assert check_numbers("There are 4 conditions.", counted)[0] == [], "정수는 WARN까지만"
     assert check_numbers("There are 4 conditions.", counted)[1], "정수 누락은 WARN으로 보고"
+
+
+@test
+def column_path_restores_reading_order():
+    import columns
+    doc = pymupdf.open(build_fixture())
+    md = columns.raw_markdown(doc)
+    assert "A. Author" not in md and "This content downloaded" not in md, "반복 요소는 제거된다"
+    li, ri = md.index("The model is developed"), md.index("This right column follows")
+    assert li < ri, "좌단 전체가 우단보다 먼저 와야 한다"
+    assert md.index("Heterogeneity is the first") < md.index("Rents are bound to the firm")
+    doc.close()
 
 
 def main():

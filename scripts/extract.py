@@ -16,20 +16,62 @@ import quality
 
 
 def extract_pdf(src: Path, outdir: Path):
-    """KorDocAI CLI + 후처리. 반환: (markdown, stats, raw_text) — 실패 시 md는 None."""
-    import pymupdf
-    import kordoc, post
+    """후보 경로를 모두 돌려 점수가 가장 좋은 결과를 고른다.
 
-    raw_md = kordoc.to_markdown(src)
+    KorDocAI는 순수한 2단 페이지에서 정확하지만, 전면 폭 제목·초록과 2단이 섞인
+    페이지에서 좌우 단을 한 줄에 합친다. 자체 블록 재구성은 그 반대 성향이라
+    문서마다 유리한 쪽이 다르다. 사람이 고르지 말고 게이트가 점수로 고른다.
+
+    반환: (markdown, stats, score, raw_text) — 후보가 하나도 없으면 md는 None.
+    """
+    import pymupdf
+    import columns, kordoc, post
+
     doc = pymupdf.open(str(src))
     raw_text = "".join(doc[i].get_text() for i in range(doc.page_count))
-    if raw_md is None:
-        doc.close()
-        return None, {}, raw_text
-    md, stats = post.postprocess(raw_md, doc, outdir / "images", src.stem)
+
+    # 표가 실제로 있는 문서에서만 표 감지를 켠 후보를 더한다. 항상 켜두면
+    # 2단 조판의 테두리를 표로 오인해 좌우 단이 한 줄에 섞인다.
+    has_tables = False
+    for page in doc:
+        try:
+            if page.find_tables().tables:
+                has_tables = True
+                break
+        except Exception:
+            pass
+
+    cands = []
+    kd = kordoc.to_markdown(src)
+    if kd:
+        cands.append(("kordoc", kd))
+    if has_tables:
+        kdt = kordoc.to_markdown(src, tables=True)
+        if kdt:
+            cands.append(("kordoc-tables", kdt))
+    cands.append(("columns", columns.raw_markdown(doc)))
+
+    best = None
+    for name, raw_md in cands:
+        # 이미지 선별은 텍스트와 무관하게 PDF에서만 결정되므로 후보마다 같은 파일이 나온다
+        md, stats = post.postprocess(raw_md, doc, outdir / "images", src.stem)
+        md = clean(md)
+        s = quality.score(md, raw_text, stats.get("dropped_chars", 0))
+        stats["extractor"] = name
+        rows = sum(1 for line in md.splitlines() if line.startswith("|"))
+        keeps_tables = (not has_tables) or rows > 0
+        print(f"  후보 {name}: 보존율 {s.coverage:.3f}, 잘린 문단 {s.truncated:.3f}"
+              + (f", 표 {rows}행" if has_tables else ""))
+        cand = (name, md, stats, s, keeps_tables)
+        if best is None:
+            best = cand
+        elif cand[4] != best[4]:          # 표 보존 여부가 갈리면 그쪽을 먼저 본다
+            if cand[4] and s.ok:
+                best = cand
+        elif quality.better(best[3], s):
+            best = cand
     doc.close()
-    stats["extractor"] = "kordoc"
-    return md, stats, raw_text
+    return best[1], best[2], best[3], raw_text
 
 
 def extract_pdf_legacy(src: Path, outdir: Path) -> str:
@@ -101,19 +143,23 @@ def main():
 
     ext = src.suffix.lower()
     if ext == ".pdf":
-        md, stats, raw_text = extract_pdf(src, outdir)
-        s = None
-        if md:
-            md = clean(md)
-            s = quality.score(md, raw_text, stats.get("dropped_chars", 0))
-        if s is None or not s.ok:              # 폴백 — 기존 pymupdf4llm 경로
-            shutil.rmtree(outdir / "images", ignore_errors=True)   # 1차 경로 이미지 제거
+        md, stats, s, raw_text = extract_pdf(src, outdir)
+        if s is None or not s.ok:              # 마지막 폴백 — 기존 pymupdf4llm 경로
+            shutil.rmtree(outdir / "images", ignore_errors=True)
             md2 = clean(extract_pdf_legacy(src, outdir))
             s2 = quality.score(md2, raw_text, 0)
+            print(f"  후보 pymupdf4llm: 보존율 {s2.coverage:.3f}, 잘린 문단 {s2.truncated:.3f}")
             if s is None or quality.better(s, s2):
                 md, s = md2, s2
                 stats = {**stats, "extractor": "pymupdf4llm",
                          "figures": len(list((outdir / "images").glob("*")))}
+            else:                              # 앞선 후보가 나으므로 이미지를 다시 만든다
+                import pymupdf, columns, kordoc, post
+                doc = pymupdf.open(str(src))
+                raw_md = (kordoc.to_markdown(src) if stats.get("extractor") == "kordoc"
+                          else columns.raw_markdown(doc))
+                post.postprocess(raw_md, doc, outdir / "images", src.stem)
+                doc.close()
         if not s.ok:
             (outdir / "extract_report.md").write_text(quality.report(s, md), encoding="utf-8")
             (outdir / "source.md").write_text(md, encoding="utf-8")

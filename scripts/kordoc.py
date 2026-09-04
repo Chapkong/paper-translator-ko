@@ -17,17 +17,24 @@ def available() -> bool:
     return NPX is not None
 
 
-def to_markdown(src, timeout: int = 600):
+def to_markdown(src, timeout: int = 600, tables: bool = False):
     """PDF를 마크다운 문자열로 돌려준다. 실패하면 None.
+
+    기본값은 표 감지를 끈다(`--no-tables`). 켜두면 2단 조판의 테두리를 표로
+    오인해 좌우 단이 한 줄에 섞인다. 실제로 표가 있는 문서에서만 tables=True를 쓴다.
 
     예외를 던지지 않는다. 폴백 여부는 호출부가 결정한다.
     """
     src = Path(src)
     if not available() or not src.exists():
         return None
-    with tempfile.TemporaryDirectory() as td:
+    # kordoc이 출력 옆에 images/를 함께 쓰는데, 윈도우에서 그 파일이 잠겨
+    # 임시 폴더 정리가 실패할 수 있다. 정리 실패로 추출을 망치지 않는다.
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as td:
         out = Path(td) / "out.md"
-        cmd = [NPX, "-y", "kordoc", str(src), "--no-tables", "--silent", "-o", str(out)]
+        cmd = [NPX, "-y", "kordoc", str(src), "--silent", "-o", str(out)]
+        if not tables:
+            cmd.insert(4, "--no-tables")
         try:
             r = subprocess.run(cmd, capture_output=True, text=True,
                                encoding="utf-8", errors="replace", timeout=timeout)

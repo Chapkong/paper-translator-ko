@@ -25,12 +25,45 @@ def norm_len(t: str) -> int:
     return len(_STRIP.sub("", t))
 
 
+# 원래 문장부호로 끝나지 않는 문단들 — 손상이 아니므로 세지 않는다
+_SKIP_PARA = re.compile(
+    r"^(figure|table|fig\.|source:|author\(s\):|published by:|stable url:|key:|그림|표\s)", re.I)
+_REFS = re.compile(r"^#*\s*(references|참고문헌|bibliography)\s*$", re.I | re.M)
+
+
+def _ends_properly(p: str) -> bool:
+    """문장이 제대로 끝났는가. 마침표 뒤에 붙은 각주 표시 번호는 무시한다
+    (`…(Rumelt, 1987). 13`, `…firm-specific needs.16`)."""
+    return re.sub(r"(?<=[.!?])\s?\d{1,3}$", "", p.rstrip()).endswith(_ENDINGS)
+
+
+def checked_paragraphs(md: str) -> list:
+    """절단 검사 대상 문단.
+
+    빼는 것들 — 손상이 아니라 원래 그런 것이다:
+    - 참고문헌 항목, 그림·표 캡션: 마침표로 끝나지 않는다
+    - 각주 바로 앞 문단: 각주 블록이 끼어들어 페이지 경계에서 닫힌 것이지 잘린 게 아니다
+    """
+    m = _REFS.search(md)
+    body = md[:m.start()] if m else md
+    blocks = [p.strip() for p in body.split("\n\n") if p.strip()]
+    out = []
+    for i, p in enumerate(blocks):
+        nxt = blocks[i + 1] if i + 1 < len(blocks) else ""
+        if len(p) <= 80 or p.lstrip().startswith(("#", "|", ">", "!")):
+            continue
+        if _SKIP_PARA.match(p) or nxt.startswith(">"):
+            continue
+        out.append(p)
+    return out
+
+
 def truncated_ratio(md: str) -> float:
-    paras = [p.strip() for p in md.split("\n\n")
-             if len(p.strip()) > 80 and not p.lstrip().startswith(("#", "|", ">", "!"))]
+    """문장 중간에서 끊긴 문단의 비율. 추출 손상의 신호다."""
+    paras = checked_paragraphs(md)
     if not paras:
         return 0.0
-    return len([p for p in paras if not p.endswith(_ENDINGS)]) / len(paras)
+    return len([p for p in paras if not _ends_properly(p)]) / len(paras)
 
 
 def score(md: str, raw_text: str, dropped_chars: int) -> Score:
@@ -40,13 +73,20 @@ def score(md: str, raw_text: str, dropped_chars: int) -> Score:
     return Score(cov, tr, cov >= MIN_COVERAGE and tr <= MAX_TRUNCATED)
 
 
-def better(current: Score, other: Score) -> bool:
-    """other가 current보다 나은 추출인가.
+def _penalty(s: Score) -> float:
+    """작을수록 좋은 추출. 보존율은 1.0에서 멀수록, 잘린 문단은 많을수록 나쁘다.
 
-    보존율은 높을수록 좋은 것이 아니라 1.0에 가까울수록 좋다. 1을 크게 넘으면
-    원문에 없는 문자(표 기호·중복 텍스트)가 늘어난 것이므로 나쁜 결과다.
+    보존율만 보면 순서 오류를 놓친다. 좌우 단이 한 줄에 섞이면 문자는 그대로라
+    보존율이 1.0에 가깝지만 문장이 끊겨 잘린 문단 비율이 치솟는다(실측 0.577).
     """
-    return abs(1.0 - other.coverage) < abs(1.0 - current.coverage)
+    return abs(1.0 - s.coverage) + s.truncated
+
+
+def better(current: Score, other: Score) -> bool:
+    """other가 current보다 나은 추출인가. 기준 통과 여부가 먼저다."""
+    if other.ok != current.ok:
+        return other.ok
+    return _penalty(other) < _penalty(current)
 
 
 def report(s: Score, md: str) -> str:
@@ -54,9 +94,7 @@ def report(s: Score, md: str) -> str:
              f"- 문자 보존율: {s.coverage:.3f} (기준 {MIN_COVERAGE})",
              f"- 잘린 문단 비율: {s.truncated:.3f} (기준 {MAX_TRUNCATED})",
              f"- 판정: {'통과' if s.ok else '미달 — 번역을 시작하지 않음'}", ""]
-    bad = [p.strip()[:100] for p in md.split("\n\n")
-           if len(p.strip()) > 80 and not p.lstrip().startswith(("#", "|", ">", "!"))
-           and not p.strip().endswith(_ENDINGS)]
+    bad = [p[:100] for p in checked_paragraphs(md) if not _ends_properly(p)]
     if bad:
         lines += ["## 잘린 것으로 의심되는 문단", ""] + [f"- …{b}" for b in bad[:20]]
     return "\n".join(lines) + "\n"

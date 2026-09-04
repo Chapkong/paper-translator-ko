@@ -52,3 +52,37 @@ def build_oracle(doc) -> Oracle:
             o.page_last[pno] = last
     o.body_size = statistics.median(all_sizes) if all_sizes else 0.0
     return o
+
+
+def units(md: str) -> list:
+    """KorDocAI 출력은 PDF 한 줄이 한 문단이다. 빈 줄 기준으로 쪼갠다."""
+    return [u.strip() for u in md.split("\n\n") if u.strip()]
+
+
+def join_unit(acc: str, part: str) -> str:
+    """줄을 잇는다. 줄 끝 하이픈은 분철이므로 공백 없이 붙인다."""
+    if not acc:
+        return part
+    if re.search(r"\w-$", acc):
+        return acc[:-1] + part
+    return acc + " " + part
+
+
+def rebuild_paragraphs(md: str, oracle) -> list:
+    """정답지의 문단 시작 줄에서만 새 문단을 연다.
+
+    반환값은 (첫 줄 키, 문단 텍스트) 쌍이다. 폰트 크기 정답지가 줄 단위이므로
+    각주를 판정하려면 문단이 자기 첫 줄의 키를 기억하고 있어야 한다.
+    """
+    paras, cur, k0 = [], "", ""
+    for u in units(md):
+        starts_new = (not cur) or key(u) in oracle.starts or u.startswith(("#", "!", "|", ">"))
+        if starts_new:
+            if cur:
+                paras.append((k0, cur))
+            cur, k0 = u, key(u)
+        else:
+            cur = join_unit(cur, u)
+    if cur:
+        paras.append((k0, cur))
+    return paras

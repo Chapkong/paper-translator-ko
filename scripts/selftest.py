@@ -122,6 +122,23 @@ def oracle_knows_paragraph_starts_and_sizes():
     doc.close()
 
 
+@test
+def paragraphs_and_hyphens_are_rebuilt():
+    from post import rebuild_paragraphs, join_unit, Oracle, key
+    o = Oracle(starts={key("The model is developed in this"), key("Rents are bound to the firm")},
+               sizes={}, body_size=8.0)
+    md = ("The model is developed in this\n\nsection. Firms rely on communi-\n\n"
+          "cation among their units.\n\nRents are bound to the firm\n\nunder imperfect mobility.")
+    paras = rebuild_paragraphs(md, o)
+    assert [p[1] for p in paras] == [
+        "The model is developed in this section. Firms rely on communication among their units.",
+        "Rents are bound to the firm under imperfect mobility."], paras
+    assert paras[0][0] == key("The model is developed in this"), "문단은 첫 줄 키를 들고 다녀야 한다"
+    assert join_unit("ends with communi-", "cation") == "ends with communication"
+    assert join_unit("ends with word", "next") == "ends with word next"
+    assert join_unit("", "first") == "first"
+
+
 def main():
     names = sys.argv[1:] or list(TESTS)
     unknown = [n for n in names if n not in TESTS]

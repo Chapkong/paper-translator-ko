@@ -212,6 +212,21 @@ def postprocess_produces_clean_markdown():
     doc.close()
 
 
+@test
+def quality_gate_scores_correctly():
+    from quality import score, norm_len
+    raw = "가나다라마바사아자차카타파하" * 100 + "."   # 마침표가 없으면 잘린 문단으로 잡힌다
+    assert score(raw, raw, 0).ok
+    bad = "가나다라마바사아자차카타파하" * 70 + "."     # 30% 유실
+    s = score(bad, raw, 0)
+    assert not s.ok and s.coverage < 0.97, s
+    assert score(bad, raw, dropped_chars=420).ok, "버린 배너는 분모에서 빼야 한다"
+    trunc = ("이 문단은 마침표 없이 끝난다 " * 6).strip()
+    s2 = score("\n\n".join([trunc] * 4), trunc * 4, 0)
+    assert not s2.ok and s2.truncated > 0.03, s2
+    assert norm_len("가 나\n다-") == 3
+
+
 def main():
     names = sys.argv[1:] or list(TESTS)
     unknown = [n for n in names if n not in TESTS]

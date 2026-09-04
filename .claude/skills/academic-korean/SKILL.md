@@ -59,9 +59,15 @@ description: 영어 학술 논문을 한국어 학술 서술체로 완역할 때
 
 ## 4-1. 각주
 
-- `> **각주 N** …` 형태의 인용 블록은 각주다. 본문과 같은 학술 서술체로 번역한다.
+- `> **각주 N** …` 형태의 인용 블록은 각주다. **본문과 똑같이 완역한다.** 각주라고 건너뛰지 않는다.
 - `> **각주 N**` 표시 자체는 그대로 둔다. 각주를 본문 문단으로 끌어올리거나 위치를 옮기지 않는다.
-- 각주 안의 서지 정보(저자·연도·서명)는 본문 참고문헌과 같은 규칙으로 원문을 유지한다.
+- 서술문은 반드시 번역한다. 원문에 없는 내용을 더하지 않되, 영어 문장을 그대로 남기지 않는다.
+  - `See Nelson (1991) and Williams (1992) for discussions on why firms are different.`
+    → `기업이 서로 다른 이유에 관한 논의는 Nelson(1991)과 Williams(1992)를 보라.`
+  - `In equilibrium, industry demand and supply conditions determine the minimum efficiency
+    level required to break even.` → `균형에서는 산업의 수요·공급 조건이 손익분기에 필요한
+    최소 효율 수준을 결정한다.`
+- 서지 문자열(저자·연도·서명·학술지명·권호·쪽수)만 원문을 유지한다. 그 외는 모두 한국어로 옮긴다.
 
 ## 5. 검수 체크리스트 (reviewer용)
 

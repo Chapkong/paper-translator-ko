@@ -63,6 +63,24 @@ def check_citations(src: str, tr: str) -> list:
     return [f"missing citation ({a}, {y})" for a, y in sorted(missing)]
 
 
+def check_footnotes(tr: str) -> list:
+    """각주가 영어 그대로 남았는지 본다.
+
+    각주는 짧아서 기존 검사를 빠져나간다 — 영문 잔존 검사는 200자 넘는 문단만 보고,
+    한글 비율은 청크 단위라 본문에 희석된다. 실제로 25개 중 17개가 미번역으로 통과했다.
+    """
+    probs = []
+    for p in tr.split("\n\n"):
+        p = p.strip()
+        if not p.startswith(">"):
+            continue
+        body = re.sub(r"^>\s*\*\*각주[^*]*\*\*\s*", "", p)
+        # 서지 문자열만 있는 각주는 원문 유지가 규칙이다. 서술문이 있는데 한글이 없으면 미번역이다.
+        if len(body) > 40 and not HANGUL.search(body):
+            probs.append("untranslated footnote: " + body[:50].replace("\n", " ") + "…")
+    return probs
+
+
 def check_paragraphs(src: str, tr: str) -> list:
     ns = len([p for p in src.split("\n\n") if p.strip()])
     nt = len([p for p in tr.split("\n\n") if p.strip()])
@@ -82,6 +100,7 @@ def main():
         probs = check_images(src, tr, wd)
         nfail, nwarn = check_numbers(src, tr)
         probs += nfail + check_citations(src, tr) + check_paragraphs(src, tr)
+        probs += check_footnotes(tr)
         for w in nwarn:
             print(f"WARN {e['id']}  {w}")
         hs, ht = len(HEAD.findall(src)), len(HEAD.findall(tr))

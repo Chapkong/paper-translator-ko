@@ -87,7 +87,8 @@ paper-translator/
 ### 4-1. 문서 추출 (적용함)
 | 후보 | 판단 |
 |---|---|
-| **KorDocAI CLI** ✅ 채택(2026-09-04) | `npx kordoc <pdf> --no-tables`. Peteraf 논문 실측 보존율 **0.972**(PyMuPDF4LLM 0.686), JSTOR 푸터·러닝헤드 자동 제거. 2단 읽기 순서를 정확히 복원한다. `--no-tables` 필수 — 기본값은 2단 테두리를 표로 오인한다 |
+| **자체 단 재구성(`columns.py`)** ✅ 채택(2026-09-04) | PyMuPDF 줄 좌표로 단·문단·각주를 직접 판정. Peteraf 실측 보존율 1.006, 잘린 문단 0.026. 혼합 레이아웃(전면 폭 제목 + 2단)에서 가장 안정적 |
+| **KorDocAI CLI** ✅ 후보로 유지 | `npx kordoc <pdf> --no-tables`. 순수 2단 페이지는 정확하고 머리글·바닥글을 알아서 지우지만, 혼합 레이아웃 페이지에서 좌우 단을 한 줄에 합친다(Peteraf 잘린 문단 0.145). 문서마다 유불리가 달라 게이트가 점수로 고른다 |
 | **PyMuPDF4LLM** ✅ 폴백으로 유지 | ML 모델 없이 CPU만으로 가장 빠름. 2단 조판에서 좌우 단이 섞여 문장이 절단되는 한계 확인. KorDocAI CLI가 없거나(오프라인) 실패할 때만 쓴다 |
 | Marker / MinerU / Docling | 레이아웃 인식은 더 좋지만 수 GB 모델·GPU 권장. 2단 레이아웃·스캔 PDF가 많아지면 **2단계에서 Marker로 교체** 검토 |
 | **mammoth + markdownify** ✅ 채택 (DOCX) | mammoth가 DOCX의 이미지·헤딩·표를 HTML로 뽑고 markdownify가 표를 Markdown 표로 변환. 순수 Python |

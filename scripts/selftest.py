@@ -227,6 +227,26 @@ def quality_gate_scores_correctly():
     assert norm_len("가 나\n다-") == 3
 
 
+@test
+def extract_runs_and_writes_utf8():
+    import json, os, shutil, subprocess
+    out = ROOT / "work" / "_fixture_run"
+    if out.exists():
+        shutil.rmtree(out)
+    # app.py와 같게 자식 프로세스 출력을 utf-8로 고정한다(윈도우 기본은 cp949)
+    env = {**os.environ, "PYTHONIOENCODING": "utf-8"}
+    r = subprocess.run([sys.executable, "scripts/extract.py", str(build_fixture()), "--out", str(out)],
+                       cwd=ROOT, capture_output=True, text=True,
+                       encoding="utf-8", errors="replace", env=env)
+    assert r.returncode == 0, (r.stdout or "") + (r.stderr or "")
+    md = (out / "source.md").read_text(encoding="utf-8")
+    assert "communication among their units." in md, md[:400]
+    assert "This content downloaded" not in md
+    meta = json.loads((out / "meta.json").read_text(encoding="utf-8"))  # cp949면 여기서 깨진다
+    assert meta["figures"] == 1 and meta["coverage"] >= 0.97, meta
+    assert meta["extractor"] in ("kordoc", "pymupdf4llm"), meta
+
+
 def main():
     names = sys.argv[1:] or list(TESTS)
     unknown = [n for n in names if n not in TESTS]

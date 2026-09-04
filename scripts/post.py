@@ -9,6 +9,8 @@ import re, statistics
 from collections import defaultdict
 from dataclasses import dataclass, field
 
+import quality
+
 
 def key(text: str) -> str:
     """줄 대조용 키. 공백·구두점 차이를 무시한다."""
@@ -131,10 +133,32 @@ def drop_cover(paras: list, limit: int = 60):
     kept, dropped = [], 0
     for i, (k0, p) in enumerate(paras):
         if i < limit and COVER_PAT.search(p):
-            dropped += len(p)
+            dropped += quality.norm_len(p)
         else:
             kept.append((k0, p))
     return kept, dropped
+
+
+def repeated_chars(doc, min_pages: int = 3) -> int:
+    """여러 쪽에 반복되는 짧은 블록(러닝헤드·바닥글)의 문자 수를 센다.
+
+    KorDocAI가 이미 지워서 결과물에 없는 텍스트다. 손실 게이트의 분모에서 빼지 않으면
+    의도적으로 버린 것이 유실로 집계되어 멀쩡한 추출이 미달 판정을 받는다.
+    """
+    seen = defaultdict(lambda: [0, set()])
+    for pno in range(doc.page_count):
+        for b in doc[pno].get_text("dict")["blocks"]:
+            if b.get("type") != 0:
+                continue
+            txt = "\n".join("".join(sp["text"] for sp in ln["spans"]).strip()
+                            for ln in b["lines"]).strip()
+            if not txt or len(txt) > 120:
+                continue
+            norm = re.sub(r"\d+", "#", re.sub(r"\s+", " ", txt)).strip().lower()
+            entry = seen[norm]
+            entry[0] += quality.norm_len(txt)
+            entry[1].add(pno)
+    return sum(chars for chars, pages in seen.values() if len(pages) >= min_pages)
 
 
 MIN_IMG_RATIO, MAX_IMG_RATIO = 0.03, 0.60
@@ -218,5 +242,6 @@ def postprocess(kordoc_md: str, doc, img_dir, stem: str):
     texts = mark_footnotes(paras, oracle)
     texts = insert_images(texts, by_page, oracle)
     n_notes = sum(1 for p in texts if p.startswith("> **각주"))
+    dropped += repeated_chars(doc)   # KorDocAI가 지운 머리말·바닥글
     return "\n\n".join(texts) + "\n", {"dropped_chars": dropped,
                                        "figures": len(picks), "footnotes": n_notes}

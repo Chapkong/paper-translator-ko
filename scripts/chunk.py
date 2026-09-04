@@ -71,7 +71,8 @@ def main():
         index.append({"id": name, "chars": len(c),
                       "images": re.findall(r"!\[[^\]]*\]\(([^)]+)\)", c),
                       "heading": next((l.strip() for l in c.splitlines() if HEAD.match(l)), "")})
-    (cdir / "index.json").write_text(json.dumps(index, indent=2, ensure_ascii=False))
+    (cdir / "index.json").write_text(json.dumps(index, indent=2, ensure_ascii=False),
+                                     encoding="utf-8")
     print(f"{len(chunks)} chunks → {cdir}")
     for e in index:
         print(f"  {e['id']}  {e['chars']:>6} chars  imgs={len(e['images'])}  {e['heading'][:60]}")

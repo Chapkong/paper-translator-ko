@@ -11,8 +11,28 @@ Output layout (work/<stem>/):
 import argparse, json, os, re, shutil, sys
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import quality
 
-def extract_pdf(src: Path, outdir: Path) -> str:
+
+def extract_pdf(src: Path, outdir: Path):
+    """KorDocAI CLI + 후처리. 반환: (markdown, stats, raw_text) — 실패 시 md는 None."""
+    import pymupdf
+    import kordoc, post
+
+    raw_md = kordoc.to_markdown(src)
+    doc = pymupdf.open(str(src))
+    raw_text = "".join(doc[i].get_text() for i in range(doc.page_count))
+    if raw_md is None:
+        doc.close()
+        return None, {}, raw_text
+    md, stats = post.postprocess(raw_md, doc, outdir / "images", src.stem)
+    doc.close()
+    stats["extractor"] = "kordoc"
+    return md, stats, raw_text
+
+
+def extract_pdf_legacy(src: Path, outdir: Path) -> str:
     import pymupdf4llm
     img_dir = outdir / "images"
     img_dir.mkdir(parents=True, exist_ok=True)
@@ -81,17 +101,38 @@ def main():
 
     ext = src.suffix.lower()
     if ext == ".pdf":
-        md = extract_pdf(src, outdir)
+        md, stats, raw_text = extract_pdf(src, outdir)
+        s = None
+        if md:
+            md = clean(md)
+            s = quality.score(md, raw_text, stats.get("dropped_chars", 0))
+        if s is None or not s.ok:              # 폴백 — 기존 pymupdf4llm 경로
+            shutil.rmtree(outdir / "images", ignore_errors=True)   # 1차 경로 이미지 제거
+            md2 = clean(extract_pdf_legacy(src, outdir))
+            s2 = quality.score(md2, raw_text, 0)
+            if s is None or quality.better(s, s2):
+                md, s = md2, s2
+                stats = {**stats, "extractor": "pymupdf4llm",
+                         "figures": len(list((outdir / "images").glob("*")))}
+        if not s.ok:
+            (outdir / "extract_report.md").write_text(quality.report(s, md), encoding="utf-8")
+            (outdir / "source.md").write_text(md, encoding="utf-8")
+            sys.exit(f"추출 품질 미달 — 보존율 {s.coverage:.3f}, 잘린 문단 {s.truncated:.3f}. "
+                     f"번역을 시작하지 않는다. 리포트: {outdir / 'extract_report.md'}")
     elif ext == ".docx":
-        md = extract_docx(src, outdir)
+        md = clean(extract_docx(src, outdir))
+        s = quality.Score(1.0, quality.truncated_ratio(md), True)
+        stats = {"extractor": "mammoth", "figures": len(list((outdir / "images").glob("*")))}
     else:
         sys.exit("supported: .pdf .docx")
 
-    md = clean(md)
     (outdir / "source.md").write_text(md, encoding="utf-8")
-    n_img = len(list((outdir / "images").glob("*")))
-    meta = {"source": str(src), "type": ext[1:], "chars": len(md), "figures": n_img}
-    (outdir / "meta.json").write_text(json.dumps(meta, indent=2, ensure_ascii=False))
+    meta = {"source": str(src), "type": ext[1:], "chars": len(md),
+            "figures": stats.get("figures", 0), "footnotes": stats.get("footnotes", 0),
+            "extractor": stats.get("extractor", "unknown"),
+            "coverage": round(s.coverage, 4), "truncated": round(s.truncated, 4)}
+    (outdir / "meta.json").write_text(json.dumps(meta, indent=2, ensure_ascii=False),
+                                      encoding="utf-8")
     print(json.dumps(meta, ensure_ascii=False))
     print(f"→ {outdir/'source.md'}")
 

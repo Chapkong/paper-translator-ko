@@ -40,6 +40,15 @@ def score(md: str, raw_text: str, dropped_chars: int) -> Score:
     return Score(cov, tr, cov >= MIN_COVERAGE and tr <= MAX_TRUNCATED)
 
 
+def better(current: Score, other: Score) -> bool:
+    """other가 current보다 나은 추출인가.
+
+    보존율은 높을수록 좋은 것이 아니라 1.0에 가까울수록 좋다. 1을 크게 넘으면
+    원문에 없는 문자(표 기호·중복 텍스트)가 늘어난 것이므로 나쁜 결과다.
+    """
+    return abs(1.0 - other.coverage) < abs(1.0 - current.coverage)
+
+
 def report(s: Score, md: str) -> str:
     lines = ["# 추출 품질 리포트", "",
              f"- 문자 보존율: {s.coverage:.3f} (기준 {MIN_COVERAGE})",

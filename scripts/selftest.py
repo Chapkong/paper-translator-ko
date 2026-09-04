@@ -247,6 +247,25 @@ def extract_runs_and_writes_utf8():
     assert meta["extractor"] in ("kordoc", "pymupdf4llm"), meta
 
 
+@test
+def verify_checks_are_strict():
+    from verify import check_images, check_numbers, check_citations, check_paragraphs
+    wd = ROOT / "work" / "_fixture_run"
+    src = "![](images/nope.png)\n\nIn 1993 the value was 3.14 (Peteraf, 1993).\n\n둘째 문단."
+    tr = "![](images/nope.png)\n\n1993년 값은 3.14였다 (Peteraf, 1993).\n\n둘째 문단."
+    assert check_images(src, tr, wd), "없는 파일은 잡혀야 한다"
+    assert check_numbers(src, tr)[0] == []
+    assert check_citations(src, tr) == []
+    assert check_paragraphs(src, tr) == []
+    bad = "값은 였다 (Peteraf, 1991).\n\n둘째 문단."
+    assert check_numbers(src, bad)[0], "빠진 연도·소수는 FAIL이어야 한다"
+    assert check_citations(src, bad), "인용 변형은 잡혀야 한다"
+    assert check_paragraphs(src, bad), "문단 수 불일치는 잡혀야 한다"
+    counted = "네 가지 조건이 있다."
+    assert check_numbers("There are 4 conditions.", counted)[0] == [], "정수는 WARN까지만"
+    assert check_numbers("There are 4 conditions.", counted)[1], "정수 누락은 WARN으로 보고"
+
+
 def main():
     names = sys.argv[1:] or list(TESTS)
     unknown = [n for n in names if n not in TESTS]

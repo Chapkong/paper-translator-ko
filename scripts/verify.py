@@ -24,6 +24,51 @@ def hangul_ratio(t: str) -> float:
     return (len(HANGUL.findall(t)) / len(letters)) if letters else 1.0
 
 
+CITE = re.compile(r"\(([A-Z][A-Za-z&.\- ]+?),\s*(\d{4}[a-z]?)\)")
+# \b를 쓰면 '1993년', '3.14였다'처럼 한글이 바로 붙은 숫자를 놓친다.
+# 한글은 \w에 포함되어 경계가 생기지 않기 때문이다. 숫자·소수점 인접만 배제한다.
+YEAR_OR_DECIMAL = re.compile(r"(?<![\d.])\d{4}(?![\d.])|(?<![\d.])\d+\.\d+(?![\d.])")
+INTEGER = re.compile(r"(?<![\d.])\d+(?![\d.])")
+
+
+def check_images(src: str, tr: str, wd) -> list:
+    """링크 문자열이 아니라 파일이 실제로 있는지 본다.
+
+    문자열만 확인하던 구멍이 지난 실행에서 이미지 유실을 통과시켰다.
+    """
+    probs = []
+    for img in IMG.findall(src):
+        if img not in tr:
+            probs.append(f"missing image link {img}")
+        elif not (Path(wd) / img).exists():
+            probs.append(f"image file not found: {img}")
+    return probs
+
+
+def check_numbers(src: str, tr: str):
+    """연도·소수는 FAIL, 그 밖의 정수는 WARN.
+
+    'four conditions → 네 가지 조건'처럼 정수가 정상적으로 한글 수사가 되는 경우가 있어
+    정수 누락을 FAIL로 잡으면 오탐이 쏟아진다.
+    """
+    fail = [f"missing number {n}" for n in
+            sorted(set(YEAR_OR_DECIMAL.findall(src)) - set(YEAR_OR_DECIMAL.findall(tr)))]
+    src_i = set(INTEGER.findall(src)) - set(YEAR_OR_DECIMAL.findall(src))
+    warn = [f"number not found (확인 필요): {n}" for n in sorted(src_i - set(INTEGER.findall(tr)))]
+    return fail, warn
+
+
+def check_citations(src: str, tr: str) -> list:
+    missing = set(CITE.findall(src)) - set(CITE.findall(tr))
+    return [f"missing citation ({a}, {y})" for a, y in sorted(missing)]
+
+
+def check_paragraphs(src: str, tr: str) -> list:
+    ns = len([p for p in src.split("\n\n") if p.strip()])
+    nt = len([p for p in tr.split("\n\n") if p.strip()])
+    return [f"paragraph count {ns}→{nt}"] if ns != nt else []
+
+
 def main():
     wd = Path(sys.argv[1])
     index = json.loads((wd / "chunks" / "index.json").read_text())
@@ -34,10 +79,11 @@ def main():
         if not tp.exists():
             print(f"FAIL {e['id']}: no translation"); fails += 1; continue
         tr = tp.read_text(encoding="utf-8")
-        probs = []
-        for img in IMG.findall(src):
-            if img not in tr:
-                probs.append(f"missing image {img}")
+        probs = check_images(src, tr, wd)
+        nfail, nwarn = check_numbers(src, tr)
+        probs += nfail + check_citations(src, tr) + check_paragraphs(src, tr)
+        for w in nwarn:
+            print(f"WARN {e['id']}  {w}")
         hs, ht = len(HEAD.findall(src)), len(HEAD.findall(tr))
         if hs != ht:
             probs.append(f"heading count {hs}→{ht}")

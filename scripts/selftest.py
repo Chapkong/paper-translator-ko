@@ -314,6 +314,36 @@ def continuations_are_merged():
     assert out[2] == "## 다음 절 제목" and out[3].startswith("and this"), "제목을 넘어 잇지 않는다"
 
 
+@test
+def final_check_catches_untranslated_footnotes():
+    import json, shutil
+    from final_check import collect
+    work, out = ROOT / "work" / "_fc", ROOT / "output" / "_fc"
+    for d in (work, out):
+        if d.exists():
+            shutil.rmtree(d)
+        d.mkdir(parents=True)
+    src = "본문 문단이다. 원문 자리다. 1993년의 논의를 다룬다.\n\n두 번째 문단이다."
+    (work / "source.md").write_text(src, encoding="utf-8")
+    (work / "meta.json").write_text(json.dumps(
+        {"coverage": 0.99, "truncated": 0.01, "extractor": "columns", "figures": 0}),
+        encoding="utf-8")
+
+    good = ("본문 문단이다. 원문 자리다. 1993년의 논의를 다룬다.\n\n두 번째 문단이다."
+            "\n\n> **각주 1** 기업이 서로 다른 이유는 Nelson(1991)을 보라.")
+    (out / "_fc.ko.md").write_text(good, encoding="utf-8")
+    (out / "_fc.html").write_text("<html><body>ok</body></html>", encoding="utf-8")
+    rows = collect(work, out)
+    assert all(r[3] for r in rows if r[0] == "미번역 각주"), rows
+
+    bad = good.replace("기업이 서로 다른 이유는 Nelson(1991)을 보라.",
+                       "See Nelson (1991) and Williams (1992) for discussions on why firms differ.")
+    (out / "_fc.ko.md").write_text(bad, encoding="utf-8")
+    rows = collect(work, out)
+    note_row = next(r for r in rows if r[0] == "미번역 각주")
+    assert not note_row[3], "영어로 남은 각주를 잡아야 한다"
+
+
 def main():
     names = sys.argv[1:] or list(TESTS)
     unknown = [n for n in names if n not in TESTS]

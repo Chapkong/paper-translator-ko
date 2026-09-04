@@ -52,19 +52,38 @@ python scripts/verify.py work/STEM
 python scripts/assemble.py work/STEM
 python scripts/to_html.py output/STEM
 ```
+`verify.py`가 0이 아닌 코드로 끝나면 **다음 단계로 넘어가지 않는다.** FAIL로 표시된 청크를
+`translator` 또는 `reviewer`로 되돌려 고친 뒤 다시 돌린다. 참고문헌·감사의 글처럼 원문 유지가
+정상인 청크는 사유를 최종 보고에 적고 넘어간다 — 다만 **그 판단 근거를 반드시 적는다.**
+
 이미지가 base64로 내장된 단일 HTML(`output/STEM/STEM.html`)이 생성된다.
 
-## 9. 결과물 검증 — `output-verifier` 서브에이전트
+## 9. 결과물 검증 — 기계 검증 + `output-verifier`
+
+**먼저 기계로 직접 잰다.** 에이전트의 판정을 그대로 믿지 않는다.
+
+```bash
+python scripts/final_check.py work/STEM output/STEM
+```
+
+미번역 각주, 미번역 본문 문단, 원문 대비 문단 수, 빠진 연도, 이미지 링크·HTML 내장,
+추출 보존율을 실제 파일에서 세어 표로 내놓는다. 결과는 `work/STEM/final_check.md`에 남는다.
+
+그다음 `output-verifier` 서브에이전트를 띄운다.
 프롬프트: "output/STEM/STEM.ko.md를 work/STEM/source.md와 대조해 판정하고 work/STEM/verdict.md에 기록하라."
 
-`verdict.md` 첫 줄이 `FAIL`이면 수정 지시에 적힌 청크만 `translator` 또는 `reviewer`로 되돌린 뒤
-`assemble.py` → `to_html.py` → `output-verifier`를 다시 실행한다. **최대 2회.**
-2회 후에도 FAIL이면 사유와 남은 문제를 사용자에게 보고하고 멈춘다. 통과했다고 보고하지 않는다.
+**두 결과가 모두 PASS여야 통과다.** 둘이 어긋나면 기계 검증을 따른다 — 판정하는 주체와
+판정받는 주체가 같으면 놓치는 것이 생긴다(실제로 각주 17개가 미번역인 채 PASS가 나왔다).
+
+FAIL이면 `final_check.md`의 미달 항목과 `verdict.md`의 수정 지시에 해당하는 청크만
+`translator`/`reviewer`로 되돌린 뒤 `assemble.py` → `to_html.py` → 9절을 다시 실행한다.
+**최대 2회.** 2회 후에도 FAIL이면 사유와 남은 문제를 사용자에게 보고하고 멈춘다.
+통과했다고 보고하지 않는다.
 
 ## 10. 최종 보고
 - 출력 경로 `output/STEM/STEM.ko.md`, HTML `output/STEM/STEM.html`, 그림 폴더 `output/STEM/images/`
-- `meta.json`의 추출기·보존율(`coverage`)·잘린 문단 비율(`truncated`), 청크 수
-- 검수 수정 건수 합계(review/*.md), 통독 수정 건수(final_review.md), `verdict.md` 판정
+- **`final_check.md`의 표를 그대로 옮겨 적는다.** 판정만 옮기지 않는다 — 사용자가 수치를 직접 본다
+- 청크 수, 검수 수정 건수 합계(review/*.md), 통독 수정 건수(final_review.md)
 - `final_review.md`의 **사용자 확인 요청 목록을 그대로 옮겨 적는다**
 - 용어 변경을 원하면 glossary 갱신 후 일괄 교체·재조립이 가능함을 안내한다
 

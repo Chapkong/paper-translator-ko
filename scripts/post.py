@@ -13,6 +13,15 @@ import figures
 import quality
 
 
+def work_stem(name: str) -> str:
+    """작업 폴더 이름. 공백·한글·기호를 밑줄로 바꾼다.
+
+    경로에 공백이 있으면 도구마다 다르게 다뤄 폴더가 갈린다. 규칙은 여기 한 곳에만 둔다 —
+    extract.py와 app.py가 다른 규칙을 쓰면 웹 UI가 엉뚱한 폴더를 보며 진행률이 멈춘다.
+    """
+    return re.sub(r"[^\w,.-]+", "_", name).strip("_")
+
+
 def key(text: str) -> str:
     """줄 대조용 키. 공백·구두점 차이를 무시한다."""
     return re.sub(r"\W+", "", text).lower()[:40]
@@ -49,7 +58,8 @@ def page_lines(page) -> list:
             if not txt:
                 continue
             sizes = [sp["size"] for sp in ln["spans"] if sp["size"] >= 2.0]
-            out.append({"x0": ln["bbox"][0], "x1": ln["bbox"][2], "y0": ln["bbox"][1],
+            out.append({"x0": ln["bbox"][0], "x1": ln["bbox"][2],
+                        "y0": ln["bbox"][1], "y1": ln["bbox"][3],
                         "text": txt, "size": statistics.median(sizes) if sizes else 0.0})
     return out
 
@@ -137,7 +147,8 @@ def build_oracle(doc) -> Oracle:
 
     # prev를 단·페이지 경계 너머로 이어간다. 문단은 단을 넘어 계속되므로
     # 새 단의 첫 줄을 무조건 문단 시작으로 보면 문장이 끊긴다.
-    prev, prev_right, force_next, prev_heading = None, 0.0, False, False
+    prev, prev_right, prev_edge = None, 0.0, 0.0
+    force_next, prev_heading = False, False
     for pno, l, edge, right_edge, height in doc_lines:
         k = key(l["text"])
         if l["size"]:
@@ -156,7 +167,13 @@ def build_oracle(doc) -> Oracle:
                        and len(l["text"]) < 80 and short_line
                        and (l["size"] >= o.body_size * HEADING_STRONG
                             or (l["size"] >= o.body_size * HEADING_MIN and context_ok)))
-        indented = l["x0"] - edge >= INDENT_PT
+        # 들여쓰기는 문단 첫 줄의 신호지만, 인용 블록은 모든 줄이 똑같이 들여써 있다
+        # (실측: 본문 x0=267, 인용문 전 줄 x0=279). 같은 위치로 이어지면 첫 줄만 문단을 연다.
+        indent_gap = l["x0"] - edge
+        prev_indent = (prev["x0"] - prev_edge) if prev is not None else 0.0
+        same_indent_run = (prev is not None and prev_indent >= INDENT_PT
+                           and abs(prev["x0"] - l["x0"]) <= 1.5)
+        indented = indent_gap >= INDENT_PT and not same_indent_run
         after_short = (prev is not None and prev["text"].endswith(_SENT_END)
                        and prev["x1"] < prev_right - SHORT_TAIL_PT)
         # 본문 크기에서 각주 크기로 내려가면 각주가 시작된 것이다. 본문 바로 뒤에
@@ -188,7 +205,7 @@ def build_oracle(doc) -> Oracle:
             o.headings.add(k)
         force_next = heading
         prev_heading = heading          # 제목 다음 줄은 본문 문단의 시작이다
-        prev, prev_right = l, right_edge
+        prev, prev_right, prev_edge = l, right_edge, edge
     return o
 
 

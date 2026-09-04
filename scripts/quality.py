@@ -30,13 +30,20 @@ def norm_len(t: str) -> int:
 # 원래 문장부호로 끝나지 않는 문단들 — 손상이 아니므로 세지 않는다
 _SKIP_PARA = re.compile(
     r"^(figure|table|fig\.|source:|author\(s\):|published by:|stable url:|key:|그림|표\s)", re.I)
+# 코드+날짜 패턴이 문단 어딘가에 등장하면 연표/표 항목으로 본다
+_CHRONOLOGY = re.compile(r"[A-Z]{1,4}\s?\d{1,3}\s+\d{1,2}/\d{2,4}\b")
+# 그림/표 셀 내용 — * 로 시작하는 구조화 데이터
+_CELL_CONTENT = re.compile(r'^["\s]*\*\s', re.M)
 _REFS = re.compile(r"^#*\s*(references|참고문헌|bibliography)\s*$", re.I | re.M)
 
 
 def _ends_properly(p: str) -> bool:
     """문장이 제대로 끝났는가. 마침표 뒤에 붙은 각주 표시 번호는 무시한다
-    (`…(Rumelt, 1987). 13`, `…firm-specific needs.16`)."""
-    return re.sub(r"(?<=[.!?])\s?\d{1,3}$", "", p.rstrip()).endswith(_ENDINGS)
+    (`…(Rumelt, 1987). 13`, `…firm-specific needs.16`).
+    Markdown 서식 마커(`_`, `*`, `^`)도 벗긴다."""
+    s = re.sub(r"(?<=[.!?])\s?\d{1,3}$", "", p.rstrip())
+    s = s.rstrip("_*^~`")
+    return s.endswith(_ENDINGS)
 
 
 def checked_paragraphs(md: str) -> list:
@@ -55,6 +62,10 @@ def checked_paragraphs(md: str) -> list:
         if len(p) <= 80 or p.lstrip().startswith(("#", "|", ">", "!")):
             continue
         if _SKIP_PARA.match(p) or nxt.startswith(">"):
+            continue
+        if _CHRONOLOGY.search(p):             # 연표 항목 (코드+날짜 포함)
+            continue
+        if _CELL_CONTENT.match(p):           # 그림/표 셀 내용
             continue
         out.append(p)
     return out

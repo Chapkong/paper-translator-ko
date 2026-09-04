@@ -12,6 +12,8 @@ from pathlib import Path
 from flask import Flask, abort, jsonify, request, send_file
 
 ROOT = Path(__file__).parent.resolve()
+sys.path.insert(0, str(ROOT / "scripts"))
+from post import work_stem          # 작업 폴더 이름 규칙은 scripts/post.py 한 곳에만 둔다
 INPUT, WORK, OUTPUT = ROOT / "input", ROOT / "work", ROOT / "output"
 ALLOWED = {".pdf", ".docx"}
 PORT = 8765
@@ -23,7 +25,7 @@ procs: dict[str, subprocess.Popen] = {}  # stem -> running claude process
 
 # ---------------------------------------------------------------- pipeline
 def start_translation(fname: str) -> None:
-    stem = Path(fname).stem
+    stem = work_stem(Path(fname).stem)
     WORK.mkdir(exist_ok=True)
     log = open(WORK / f"{stem}.claude.log", "w", encoding="utf-8")
     cmd = [
@@ -83,7 +85,7 @@ def list_jobs() -> list[dict]:
     if INPUT.exists():
         for f in sorted(INPUT.iterdir()):
             if f.suffix.lower() in ALLOWED:
-                src.setdefault(f.stem, f.name)
+                src.setdefault(work_stem(f.stem), f.name)
     stems = dict.fromkeys(list(src) + [d.name for d in OUTPUT.iterdir() if d.is_dir()] if OUTPUT.exists() else list(src))
     order = sorted(stems, key=lambda s: -(INPUT / src[s]).stat().st_mtime if s in src else 0)
     return [job_status(s, src.get(s)) for s in order]
@@ -114,7 +116,7 @@ def upload():
     name = Path(f.filename).name
     if Path(name).suffix.lower() not in ALLOWED:
         return jsonify({"error": "PDF 또는 DOCX만 지원합니다"}), 400
-    stem = Path(name).stem
+    stem = work_stem(Path(name).stem)
     if stem in procs and procs[stem].poll() is None:
         return jsonify({"error": f"'{stem}'은(는) 이미 번역 중입니다"}), 409
     INPUT.mkdir(exist_ok=True)

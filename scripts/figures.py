@@ -16,9 +16,12 @@ PAD = 4.0          # 표 bbox 여유
 FIG_PAD = 14.0     # 그림 좌우 여유 — 도형이 본문 줄보다 바깥으로 나간다
 GAP_PT = 15.0      # 캡션 위 빈 공간이 이만큼이면 진짜 캡션으로 본다
 MIN_HEIGHT = 40.0  # 이보다 얇으면 그림이 없다고 본다
-MAX_HEIGHT_RATIO = 0.6   # 페이지 높이의 이 비율을 넘게 자르지 않는다
+MAX_HEIGHT_RATIO = 0.6   # 캡션 위쪽으로 이 비율을 넘게 자르지 않는다
+MAX_BELOW_RATIO = 0.85   # 캡션 아래쪽 한계 — 전면 표는 페이지를 거의 채운다
 BODY_LO, BODY_HI = 0.90, 1.12   # 본문 글자 크기로 인정하는 범위
 WIDE_RATIO = 0.40  # 단 폭 대비 이 비율 이상이면 '넓은 줄'
+PROSE_RUN = 3      # 본문으로 인정하려면 연속 몇 줄이어야 하는가
+                   # (표 머리행이 본문 크기·폭이라 한두 줄로는 못 가른다)
 
 
 def _overlaps(a, b, slack=30.0):
@@ -54,26 +57,76 @@ def is_caption(cap, lines, body_size, width) -> bool:
     return small or gap or centered
 
 
-def _region_top(cap, lines, body_size, col_x0, col_x1, page_height):
-    """캡션 위로 올라가며 본문 문단을 만나면 멈춘다.
+_NUM_TOKEN = re.compile(r"^[\d.,%$/\[\]()·~-]+$")
 
-    그림 내부 글자는 폰트 크기가 본문과 동떨어져 있다(실측 2.15~24.06pt vs 본문 8.31).
-    본문 크기이면서 폭이 넓은 줄이라야 진짜 문단이다 — 'MC'처럼 짧은 조각은 그림의 일부다.
+
+def _table_row(text: str) -> bool:
+    """수치·코드가 늘어선 표 행인가.
+
+    `Miami-Ft. Lauderdale [12] 2.6 mil. 30.5% 1.01%`처럼 본문과 같은 크기·폭이라
+    좌표만으로는 본문과 못 가른다. 스캔 텍스트는 셀이 한 스팬으로 합쳐져 나와
+    줄 안 공백 간격도 쓸 수 없다(실측 전부 0). 남는 신호가 토큰 구성이다.
     """
+    tokens = text.split()
+    return sum(1 for t in tokens if _NUM_TOKEN.match(t)) >= 3
+
+
+def _is_prose(line, body_size, col_w) -> bool:
+    """본문 문단에 속한 줄인가.
+
+    그림·표 내부 글자는 폰트 크기가 본문과 동떨어져 있다(실측 2.15~24.06pt vs 본문 8.31).
+    본문 크기이면서 폭이 넓은 줄이라야 진짜 문단이다 — 'MC'처럼 짧은 조각은 그림의 일부다.
+    수치가 늘어선 표 행은 크기·폭이 본문과 같아도 본문이 아니다.
+    """
+    return bool(body_size and body_size * BODY_LO <= line["size"] <= body_size * BODY_HI
+                and (line["x1"] - line["x0"]) >= col_w * WIDE_RATIO
+                and not _table_row(line["text"]))
+
+
+def _region_top(cap, lines, body_size, col_x0, col_x1, page_height):
+    """캡션 위로 올라가며 본문 문단을 만나면 멈춘다. 그림 캡션은 그림 아래에 붙는다."""
     col_w = max(col_x1 - col_x0, 1.0)
     floor_y = max(cap["y0"] - page_height * MAX_HEIGHT_RATIO, 0.0)
     above = sorted((l for l in lines if l["y0"] < cap["y0"] - 2 and _overlaps(l, cap)),
                    key=lambda l: -l["y0"])
-    top = cap["y0"]
+    # 본문은 여러 줄이 이어진다. 한 줄만 보고 멈추면 표의 긴 행 하나에 걸려
+    # 영역이 잘린다. 연속 두 줄이 본문처럼 보일 때만 멈춘다.
+    top, run = cap["y0"], 0
     for l in above:
         if l["y0"] < floor_y:
             break
-        is_body = (body_size and body_size * BODY_LO <= l["size"] <= body_size * BODY_HI
-                   and (l["x1"] - l["x0"]) >= col_w * WIDE_RATIO)
-        if is_body:
-            break
-        top = l["y0"] - 2
+        if _is_prose(l, body_size, col_w):
+            run += 1
+            if run >= PROSE_RUN:
+                break
+        else:
+            run = 0
+            top = l["y0"] - 2
     return top
+
+
+def _region_bottom(cap, lines, body_size, col_x0, col_x1, page_height):
+    """캡션 아래로 내려가며 본문 문단을 만나면 멈춘다.
+
+    **표 캡션은 표 위에 붙는다.** 그림과 반대다. 이 방향을 보지 않으면 괘선 없는 표가
+    통째로 본문에 흘러들어 문단의 절반이 문장 중간에서 끊긴다(Noda·Bower 논문 실측 0.46).
+    """
+    col_w = max(col_x1 - col_x0, 1.0)
+    ceil_y = min(cap["y1"] + page_height * MAX_BELOW_RATIO, page_height)
+    below = sorted((l for l in lines if l["y0"] > cap["y1"] + 1 and _overlaps(l, cap)),
+                   key=lambda l: l["y0"])
+    bottom, run = cap["y1"], 0
+    for l in below:
+        if l["y0"] > ceil_y:
+            break
+        if _is_prose(l, body_size, col_w):
+            run += 1
+            if run >= PROSE_RUN:    # 본문 문단이 시작됐다
+                break
+        else:
+            run = 0
+            bottom = l.get("y1", l["y0"] + 8)
+    return bottom
 
 
 def plan(page, lines, body_size, pno) -> list:
@@ -97,11 +150,25 @@ def plan(page, lines, body_size, pno) -> list:
         if not is_caption(cap, lines, body_size, width):
             continue
         col_x0, col_x1 = _column_bounds(lines, cap, width)
-        top = _region_top(cap, lines, body_size, col_x0, col_x1, height)
-        if cap["y0"] - top < MIN_HEIGHT:      # 그림이 없다 — 자르지 않는다
+        # 표 캡션은 표 위에, 그림 캡션은 그림 아래에 붙는다. 먼저 제 방향을 보고,
+        # 비어 있으면 반대쪽을 본다(저널마다 관행이 갈린다).
+        is_table_cap = bool(re.match(r"^(table|표)\b", cap["text"].strip(), re.I))
+        order = ["below", "above"] if is_table_cap else ["above", "below"]
+        rect = None
+        for direction in order:
+            if direction == "above":
+                top = _region_top(cap, lines, body_size, col_x0, col_x1, height)
+                if cap["y0"] - top >= MIN_HEIGHT:
+                    rect = (col_x0 - FIG_PAD, top, col_x1 + FIG_PAD, cap["y0"] - 2)
+                    break
+            else:
+                bottom = _region_bottom(cap, lines, body_size, col_x0, col_x1, height)
+                if bottom - cap["y1"] >= MIN_HEIGHT:
+                    rect = (col_x0 - FIG_PAD, cap["y1"] + 1, col_x1 + FIG_PAD, bottom + 2)
+                    break
+        if rect is None:                      # 어느 쪽에도 없다 — 자르지 않는다
             continue
-        out.append({"page": pno, "rect": (col_x0 - FIG_PAD, top, col_x1 + FIG_PAD, cap["y0"] - 2),
-                    "y": top, "cap_text": cap["text"]})
+        out.append({"page": pno, "rect": rect, "y": rect[1], "cap_text": cap["text"]})
 
     out.sort(key=lambda r: r["y"])
     for i, r in enumerate(out, 1):

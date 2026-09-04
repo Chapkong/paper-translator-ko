@@ -76,7 +76,7 @@ def extract_pdf(src: Path, outdir: Path):
 
 def extract_pdf_legacy(src: Path, outdir: Path) -> str:
     import pymupdf4llm
-    img_dir = outdir / "images"
+    img_dir = (outdir / "images").resolve()
     img_dir.mkdir(parents=True, exist_ok=True)
     md = pymupdf4llm.to_markdown(
         str(src),
@@ -117,6 +117,65 @@ def extract_docx(src: Path, outdir: Path) -> str:
     return md
 
 
+_SENT_END_EX = (".", "!", "?", '"', "'", ")", "]",
+                "\u201c", "\u201d", "\u2018", "\u2019")
+_SKIP_RE = re.compile(r"^(figure|table|fig\.|source:)", re.I)
+
+
+def stitch_pages(md: str):
+    """pymupdf4llm 출력에서 러닝 헤더·페이지 번호를 빼고 페이지 경계에서
+    끊긴 문장을 잇는다. 반환: (markdown, dropped_chars)"""
+    from collections import Counter
+    blocks = [b.strip() for b in md.split("\n\n") if b.strip()]
+
+    # 1) 러닝 헤더 탐지: 숫자를 빼고 정규화했을 때 3회 이상 반복되는 짧은 블록
+    def _hn(s):
+        return re.sub(r"\s+", " ", re.sub(r"\d+", "", s)).strip()
+    counts = Counter(_hn(b) for b in blocks if len(b) < 120)
+    repeated = {n for n, c in counts.items() if c >= 3 and n}
+    kept, removed_chars = [], 0
+    for b in blocks:
+        if (len(b) < 120 and _hn(b) in repeated) or re.fullmatch(r"_?\d{1,4}_?", b):
+            removed_chars += quality.norm_len(b)
+        else:
+            kept.append(b)
+    blocks = kept
+
+    # 2) 문장 잇기: 문장부호로 안 끝나는 본문 문단 + 소문자로 시작하는 다음 본문 문단
+    def _can_skip(b):
+        return (b.lstrip().startswith(("#", ">", "!", "|"))
+                or len(b) < 80
+                or _SKIP_RE.match(b)
+                or re.match(r"^\^[\s\d]", b))
+
+    out, i = [], 0
+    while i < len(blocks):
+        p = blocks[i]
+        if (len(p) > 80 and not p.lstrip().startswith(("#", "|", ">", "!"))
+                and not p.rstrip("_*^").rstrip().endswith(_SENT_END_EX)):
+            j = i + 1
+            skipped = []
+            while j < len(blocks) and _can_skip(blocks[j]):
+                if blocks[j].lstrip().startswith("#"):
+                    break            # 제목을 넘어서는 잇지 않는다
+                skipped.append(blocks[j])
+                j += 1
+            if (j < len(blocks) and not blocks[j].lstrip().startswith("#")
+                    and re.match(r"[a-z]", blocks[j])):
+                if re.search(r"\w-$", p):
+                    p = p[:-1] + blocks[j]
+                else:
+                    p = p + " " + blocks[j]
+                out.append(p)
+                out.extend(skipped)
+                i = j + 1
+                continue
+        out.append(p)
+        i += 1
+
+    return "\n\n".join(out) + "\n", removed_chars
+
+
 def clean(md: str) -> str:
     md = re.sub(r"\n{3,}", "\n\n", md)          # collapse blank runs
     md = re.sub(r"-----+\n", "", md)              # pymupdf page separators
@@ -132,11 +191,15 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("src")
     ap.add_argument("--out", default=None)
+    ap.add_argument("--force", action="store_true",
+                    help="품질 게이트를 경고로 낮추고 진행 (보존율은 여전히 검사)")
     a = ap.parse_args()
     src = Path(a.src).resolve()
     if not src.exists():
         sys.exit(f"not found: {src}")
-    outdir = Path(a.out) if a.out else Path("work") / src.stem
+    import post
+    stem = post.work_stem(src.stem)
+    outdir = Path(a.out) if a.out else Path("work") / stem
     if outdir.exists():
         shutil.rmtree(outdir)
     outdir.mkdir(parents=True)
@@ -147,7 +210,8 @@ def main():
         if s is None or not s.ok:              # 마지막 폴백 — 기존 pymupdf4llm 경로
             shutil.rmtree(outdir / "images", ignore_errors=True)
             md2 = clean(extract_pdf_legacy(src, outdir))
-            s2 = quality.score(md2, raw_text, 0)
+            md2, dropped2 = stitch_pages(md2)
+            s2 = quality.score(md2, raw_text, dropped2)
             print(f"  후보 pymupdf4llm: 보존율 {s2.coverage:.3f}, 잘린 문단 {s2.truncated:.3f}")
             if s is None or quality.better(s, s2):
                 md, s = md2, s2
@@ -162,9 +226,12 @@ def main():
                 doc.close()
         if not s.ok:
             (outdir / "extract_report.md").write_text(quality.report(s, md), encoding="utf-8")
-            (outdir / "source.md").write_text(md, encoding="utf-8")
-            sys.exit(f"추출 품질 미달 — 보존율 {s.coverage:.3f}, 잘린 문단 {s.truncated:.3f}. "
-                     f"번역을 시작하지 않는다. 리포트: {outdir / 'extract_report.md'}")
+            if not a.force or s.coverage < quality.MIN_COVERAGE:
+                (outdir / "source.md").write_text(md, encoding="utf-8")
+                sys.exit(f"추출 품질 미달 — 보존율 {s.coverage:.3f}, 잘린 문단 {s.truncated:.3f}. "
+                         f"번역을 시작하지 않는다. 리포트: {outdir / 'extract_report.md'}")
+            print(f"⚠ 잘린 문단 {s.truncated:.3f} > {quality.MAX_TRUNCATED} 이지만 "
+                  f"--force로 진행 (보존율 {s.coverage:.3f} 통과)")
     elif ext == ".docx":
         md = clean(extract_docx(src, outdir))
         s = quality.Score(1.0, quality.truncated_ratio(md), True)

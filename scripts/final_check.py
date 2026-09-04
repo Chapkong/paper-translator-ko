@@ -19,6 +19,7 @@ import verify
 
 HANGUL = re.compile(r"[가-힣]")
 REFS = re.compile(r"^#*\s*(references|참고문헌|bibliography)\s*$", re.I | re.M)
+GLOSSARY = re.compile(r"^#*\s*용어\s*대응표", re.I | re.M)
 YEAR = re.compile(r"(?<![\d.])\d{4}(?![\d.])")
 IMG = re.compile(r"!\[[^\]]*\]\(([^)]+)\)")
 
@@ -53,8 +54,10 @@ def collect(work: Path, out: Path) -> list:
     rows.append(("미번역 본문 문단", f"{len(eng)}건", "0건", not eng))
 
     # 3. 원문 대비 문단 수 — 통째로 빠진 문단을 잡는다
+    #    용어표 부록은 assemble.py가 항상 추가하므로 비교에서 뺀다
     ns = len([p for p in src.split("\n\n") if p.strip()])
-    nt = len([p for p in ko.split("\n\n") if p.strip()])
+    ko_body = ko[:GLOSSARY.search(ko).start()] if GLOSSARY.search(ko) else ko
+    nt = len([p for p in ko_body.split("\n\n") if p.strip()])
     ok = ns == 0 or abs(ns - nt) <= max(2, ns * 0.02)
     rows.append(("문단 수(원문→번역)", f"{ns}→{nt}", "±2% 이내", ok))
 

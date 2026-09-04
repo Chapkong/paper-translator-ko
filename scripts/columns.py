@@ -15,5 +15,5 @@ SEP = "\n\n"
 
 def raw_markdown(doc) -> str:
     """KorDocAI와 같은 모양의 마크다운을 만든다 — 한 줄이 한 단위, 빈 줄로 구분."""
-    lines, _body_size = post.ordered_lines(doc)
+    lines, _body_size, _regions = post.ordered_lines(doc)
     return SEP.join(l["text"] for _pno, l, _edge, _right, _height in lines if l["text"])

@@ -9,6 +9,7 @@ import re, statistics
 from collections import defaultdict
 from dataclasses import dataclass, field
 
+import figures
 import quality
 
 
@@ -76,39 +77,12 @@ def _columns_of(lines: list, width: float) -> list:
     return cols
 
 
-def _merge_tables(page, lines: list) -> list:
-    """감지된 표를 마크다운으로 렌더링해 줄 목록에 끼워 넣는다.
-
-    표를 이루던 낱줄은 뺀다. 그대로 두면 표와 본문에 같은 내용이 두 번 실린다.
-    외부 도구의 표 감지에 기대지 않는다 — 2단 조판에서 오탐이 나기 때문이다.
-    """
-    try:
-        tables = page.find_tables().tables
-    except Exception:
-        return lines
-    if not tables:
-        return lines
-    out, boxes = [], []
-    for t in tables:
-        try:
-            md = t.to_markdown().strip()
-        except Exception:
-            continue
-        if not md:
-            continue
-        x0, y0, x1, y1 = t.bbox
-        boxes.append((x0, y0, x1, y1))
-        out.append({"x0": x0, "x1": x1, "y0": y0, "text": md, "size": 0.0, "kind": "table"})
-    kept = [l for l in lines
-            if not any(x0 <= (l["x0"] + l["x1"]) / 2 <= x1 and y0 <= l["y0"] <= y1
-                       for x0, y0, x1, y1 in boxes)]
-    return kept + out
-
-
 def ordered_lines(doc):
-    """문서를 읽는 순서대로 줄을 돌려준다. 반환: (줄 목록, 본문 폰트 중앙값)
+    """문서를 읽는 순서대로 줄을 돌려준다. 반환: (줄 목록, 본문 폰트 중앙값, 영역 목록)
 
     - 러닝헤드·바닥글은 뺀다. 결과물에서 지워지므로 정답지에도 있으면 안 된다.
+    - 그림·표 영역 안의 줄은 뺀다. 그 영역은 이미지로 잘라 넣으므로 텍스트로도
+      실리면 중복이고, 대개 OCR 잔재라 본문을 더럽힌다.
     - 각주는 해당 페이지 끝으로 모은다. 각주는 단 하단에 있어서 그대로 두면
       본문 문단 한가운데를 갈라놓는다(본문은 다음 단으로 이어지는데 그 사이에 끼어든다).
 
@@ -119,12 +93,15 @@ def ordered_lines(doc):
                  for l in page_lines(doc[pno]) if l["size"]]
     body_size = statistics.median(all_sizes) if all_sizes else 0.0
 
-    out = []
+    out, regions_by_page = [], {}
     for pno in range(doc.page_count):
         page = doc[pno]
         height, width = page.rect.height, page.rect.width
         lines = [l for l in page_lines(page) if repeat_norm(l["text"]) not in repeated]
-        lines = _merge_tables(page, lines)
+        regions = figures.plan(page, lines, body_size, pno)
+        if regions:
+            regions_by_page[pno] = regions
+            lines = [l for l in lines if not figures.covers(regions, l)]
         body, notes = [], []
         for col in _columns_of(lines, width):
             if not col:
@@ -138,12 +115,14 @@ def ordered_lines(doc):
                 if not key(l["text"]):
                     continue
                 item = (pno, l, edge, right_edge, height)
+                # 캡션은 글자가 작아도 각주가 아니다 — 그림 바로 아래 자리를 지켜야 한다
                 is_note = (body_size and l["size"]
                            and l["size"] <= body_size * FOOTNOTE_RATIO
-                           and l["y0"] > height * 0.4)
+                           and l["y0"] > height * 0.4
+                           and not figures.CAPTION_RE.match(l["text"].strip()))
                 (notes if is_note else body).append(item)
         out.extend(body + notes)
-    return out, body_size
+    return out, body_size, regions_by_page
 
 
 def build_oracle(doc) -> Oracle:
@@ -154,7 +133,7 @@ def build_oracle(doc) -> Oracle:
     조판이 실제로 쓰는 신호를 본다: 첫 줄 들여쓰기, 그리고 단 끝까지 못 채운 마지막 줄.
     """
     o = Oracle()
-    doc_lines, o.body_size = ordered_lines(doc)
+    doc_lines, o.body_size, _regions = ordered_lines(doc)
 
     # prev를 단·페이지 경계 너머로 이어간다. 문단은 단을 넘어 계속되므로
     # 새 단의 첫 줄을 무조건 문단 시작으로 보면 문장이 끊긴다.
@@ -192,8 +171,11 @@ def build_oracle(doc) -> Oracle:
         size_rise = (prev is not None and o.body_size and l["size"] and prev["size"]
                      and prev["size"] <= o.body_size * FOOTNOTE_RATIO
                      and l["size"] > o.body_size * FOOTNOTE_RATIO)
+        # 캡션은 언제나 문단을 연다. 가운데 정렬이라 단 분류가 흔들리면 들여쓰기
+        # 신호를 잃고 앞 문단에 흡수되는데, 그러면 그림을 붙일 자리를 잃는다.
+        is_caption = bool(figures.CAPTION_RE.match(l["text"].strip()))
         is_table = l.get("kind") == "table"
-        is_start = bool(is_table or prev is None or indented or after_short
+        is_start = bool(is_table or is_caption or prev is None or indented or after_short
                         or heading or force_next or size_drop or size_rise)
         if is_start:
             o.starts.add(k)
@@ -270,7 +252,7 @@ def mark_footnotes(paras: list, oracle) -> list:
     KorDocAI가 이미 해당 페이지 본문 뒤에 번호순으로 모아뒀다."""
     out = []
     for k0, p in paras:
-        if not is_footnote(k0, oracle):
+        if figures.CAPTION_RE.match(p.strip()) or not is_footnote(k0, oracle):
             out.append(p)
             continue
         m = re.match(r"^(\d+)\s*(.*)$", p, re.S)
@@ -399,22 +381,91 @@ def insert_images(paras: list, by_page: dict, oracle) -> list:
     return out
 
 
+def _is_body(text: str) -> bool:
+    return not text.lstrip().startswith(("#", ">", "!", "|"))
+
+
+def merge_continuations(texts: list) -> list:
+    """페이지·단을 넘어 이어지는 문장을 한 문단으로 잇는다.
+
+    각주를 페이지 끝으로 모으면서 본문 문단이 각주 블록에 막혀 닫힌다. 다음 쪽의
+    이어지는 부분이 별도 문단이 되면 번역자가 문장 조각을 따로 번역하게 된다.
+    끼어든 각주·이미지는 버리지 않고 합쳐진 문단 뒤로 옮긴다.
+    """
+    out, i = [], 0
+    while i < len(texts):
+        p = texts[i]
+        if _is_body(p) and not p.rstrip().endswith(_SENT_END):
+            j, skipped, blocked = i + 1, [], False
+            while j < len(texts) and not _is_body(texts[j]):
+                if texts[j].lstrip().startswith("#"):
+                    blocked = True      # 제목을 넘어서는 잇지 않는다 — 절이 실제로 끝난 자리다
+                    break
+                skipped.append(texts[j])
+                j += 1
+            # 소문자로 시작해야 이어지는 문장이다. 새 문단은 대문자나 인용부호로 시작한다.
+            if not blocked and j < len(texts) and re.match(r"^[a-z]", texts[j]):
+                out.append(join_unit(p, texts[j]))
+                out.extend(skipped)
+                i = j + 1
+                continue
+        out.append(p)
+        i += 1
+    return out
+
+
+def insert_region_links(texts: list, regions_by_page: dict) -> list:
+    """잘라낸 그림 이미지를 캡션 문단 바로 앞에 넣는다."""
+    anchors = {}
+    for regions in regions_by_page.values():
+        for r in regions:
+            if r.get("cap_text"):
+                anchors[key(r["cap_text"])] = r["link"]
+    if not anchors:
+        return texts
+    out, used = [], set()
+    for p in texts:
+        k = key(p)
+        for ak, link in anchors.items():
+            if ak not in used and ak and k.startswith(ak[:20]):
+                out.append(link)
+                used.add(ak)
+                break
+        out.append(p)
+    out.extend(link for ak, link in anchors.items() if ak not in used)
+    return out
+
+
 def postprocess(kordoc_md: str, doc, img_dir, stem: str):
     """KorDocAI 출력을 번역 가능한 마크다운으로 다듬는다. 반환: (markdown, stats)"""
     oracle = build_oracle(doc)
+    _lines, _body, regions_by_page = ordered_lines(doc)
     md = strip_kordoc_images(kordoc_md)
     paras = rebuild_paragraphs(md, oracle)
     paras, dropped = drop_cover(paras)
 
     cover = 0 if any(COVER_PAT.search(u) for u in units(kordoc_md)[:60]) else None
     picks = pick_images(doc, skip_pages=() if cover is None else (cover,))
+    # 잘라낸 영역 안의 삽입 이미지는 중복이므로 뺀다
+    picks = [(pno, xref, r) for pno, xref, r in picks
+             if not figures.covers(regions_by_page.get(pno, []),
+                                   {"x0": r.x0, "x1": r.x1, "y0": r.y0})]
     by_page = save_images(doc, picks, img_dir, stem) if picks else {}
+    n_cropped = figures.render(doc, regions_by_page, img_dir)
+    # 캡션 없는 영역(표)은 페이지 기준으로 배치한다
+    for pno, regions in regions_by_page.items():
+        for r in regions:
+            if not r.get("cap_text"):
+                by_page.setdefault(pno, []).append(r["link"])
 
     paras = [(k0, f"## {p}" if k0 in oracle.headings and not p.startswith("#") else p)
              for k0, p in paras]
     texts = mark_footnotes(paras, oracle)
+    texts = merge_continuations(texts)
+    texts = insert_region_links(texts, regions_by_page)
     texts = insert_images(texts, by_page, oracle)
     n_notes = sum(1 for p in texts if p.startswith("> **각주"))
-    dropped += repeated_chars(doc)   # KorDocAI가 지운 머리말·바닥글
+    dropped += repeated_chars(doc)   # 지운 머리말·바닥글
     return "\n\n".join(texts) + "\n", {"dropped_chars": dropped,
-                                       "figures": len(picks), "footnotes": n_notes}
+                                       "figures": len(picks) + n_cropped,
+                                       "footnotes": n_notes}

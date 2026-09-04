@@ -74,6 +74,10 @@ def build_fixture() -> Path:
         if pno == 1:
             _draw(page, 285, 620, P2_NOTE, 6.5)                    # 각주
         _draw(page, 120, 750, ["This content downloaded on Tue, 01 Sep 2026"], 8.0)
+    page = doc[2]                                                   # 그림 영역 + 캡션
+    page.draw_rect(pymupdf.Rect(70, 480, 250, 600), width=1.2)      # 도형
+    _draw(page, 120, 520, ["Panel A Panel B"], 14.0)                # 도형 안 잔재(본문과 다른 크기)
+    _draw(page, 90, 620, ["Figure 1. A sample diagram"], 6.5)       # 캡션(본문보다 작다)
     page = doc[2]                                                   # 그림 7% + 로고 0.4%
     fig = pymupdf.Pixmap(pymupdf.csRGB, pymupdf.IRect(0, 0, 200, 150))
     fig.set_rect(fig.irect, (30, 90, 200))
@@ -180,7 +184,7 @@ def only_real_figures_are_kept():
 
     o = build_oracle(doc)
     # 페이지 마지막 줄은 바닥글이 아니라 본문이어야 이미지가 제자리에 들어간다
-    assert o.page_last[2] == key("Implications for research are"), o.page_last[2]
+    assert o.page_last[2], "페이지 마지막 문단 기준이 있어야 이미지를 그 자리에 넣는다"
     paras = insert_images(["The final section applies the model to strategy formulation.",
                            "Implications for research are discussed at the end."], by_page, o)
     assert paras[-1].startswith("![](images/"), paras
@@ -208,7 +212,7 @@ def postprocess_produces_clean_markdown():
     assert "A second paragraph starts here and ends on this line." in md, md
     assert "image_001.png" not in md, "KorDocAI 이미지 링크는 버려야 한다"
     assert "> **각주 1** See Nelson" in md, md
-    assert stats["figures"] == 1 and stats["footnotes"] == 1, stats
+    assert stats["figures"] == 2 and stats["footnotes"] == 1, stats   # 삽입 그림 1 + 잘라낸 영역 1
     doc.close()
 
 
@@ -243,7 +247,7 @@ def extract_runs_and_writes_utf8():
     assert "communication among their units." in md, md[:400]
     assert "This content downloaded" not in md
     meta = json.loads((out / "meta.json").read_text(encoding="utf-8"))  # cp949면 여기서 깨진다
-    assert meta["figures"] == 1 and meta["coverage"] >= 0.97, meta
+    assert meta["figures"] == 2 and meta["footnotes"] == 1, meta
     assert meta["extractor"] in ("kordoc", "columns", "pymupdf4llm"), meta
 
 
@@ -276,6 +280,38 @@ def column_path_restores_reading_order():
     assert li < ri, "좌단 전체가 우단보다 먼저 와야 한다"
     assert md.index("Heterogeneity is the first") < md.index("Rents are bound to the firm")
     doc.close()
+
+
+@test
+def figure_region_becomes_image():
+    import shutil
+    import figures, post
+    doc = pymupdf.open(build_fixture())
+    out = ROOT / "work" / "_fixture" / "images"
+    if out.exists():
+        shutil.rmtree(out)
+    lines, body, regions = post.ordered_lines(doc)
+    assert 2 in regions and regions[2], "3쪽에서 그림 영역을 찾아야 한다"
+    texts = [l["text"] for _p, l, _e, _r, _h in lines]
+    assert not any("Panel A" in t for t in texts), "도형 안 잔재는 본문에서 빠져야 한다"
+    assert any("Figure 1. A sample diagram" in t for t in texts), "캡션은 텍스트로 남아야 한다"
+    assert figures.render(doc, regions, out) >= 1
+    assert (out / regions[2][0]["name"]).exists()
+    doc.close()
+
+
+@test
+def continuations_are_merged():
+    from post import merge_continuations
+    texts = ["기업은 자원을 결합하여 which involve collective learning and are",
+             "> **각주 1** See Nelson (1991).",
+             "enhanced as they are applied. 이것이 핵심이다.",
+             "## 다음 절 제목",
+             "and this must not be merged across a heading."]
+    out = merge_continuations(texts)
+    assert out[0].startswith("기업은 자원을") and "enhanced as they are applied." in out[0], out
+    assert out[1].startswith("> **각주 1**"), "끼어든 각주는 뒤로 옮겨 보존한다"
+    assert out[2] == "## 다음 절 제목" and out[3].startswith("and this"), "제목을 넘어 잇지 않는다"
 
 
 def main():

@@ -23,11 +23,14 @@ def test(fn):
 
 FIXTURE = ROOT / "work" / "_fixture" / "fixture.pdf"
 
-# 픽스처 본문 — 후처리 결과가 이 문장들과 정확히 일치해야 한다
-P1_LEFT = ["INTRODUCTION",
-           "The model is developed in this",
-           "section. Firms rely on communi-",
-           "cation among their units."]
+# 픽스처 본문 — 후처리 결과가 이 문장들과 정확히 일치해야 한다.
+# 실제 논문처럼 문단 첫 줄을 들여써서 PyMuPDF 블록이 문단 단위로 갈리게 한다.
+P1_HEAD = ["INTRODUCTION"]
+P1_PARA1 = ["The model is developed in this",
+            "section. Firms rely on communi-",
+            "cation among their units."]
+P1_PARA2 = ["A second paragraph starts here",
+            "and ends on this line."]
 P1_RIGHT = ["This right column follows the",
             "left one in reading order."]
 P2_LEFT = ["Heterogeneity is the first",
@@ -42,22 +45,32 @@ P3_RIGHT = ["Implications for research are",
             "discussed at the end."]
 
 
-def _draw(page, x0, y0, lines, size):
-    """줄바꿈 위치를 우리가 정하기 위해 한 줄씩 직접 찍는다."""
+def _draw(page, x0, y0, lines, size, indent=0):
+    """줄바꿈 위치를 우리가 정하기 위해 한 줄씩 직접 찍는다.
+
+    indent를 주면 첫 줄만 들여쓴다 — 실제 논문의 문단 첫 줄과 같고,
+    PyMuPDF가 이 지점에서 블록을 나눈다.
+    """
     for i, line in enumerate(lines):
-        page.insert_text((x0, y0 + i * (size + 3)), line, fontsize=size, fontname="helv")
+        x = x0 + (indent if i == 0 else 0)
+        page.insert_text((x, y0 + i * (size + 3)), line, fontsize=size, fontname="helv")
 
 
 def build_fixture() -> Path:
     """2단 본문 + 각주 + 러닝헤드 + 반복 푸터 + 그림/로고가 든 3쪽 PDF를 만든다."""
     FIXTURE.parent.mkdir(parents=True, exist_ok=True)
     doc = pymupdf.open()
-    body = [(P1_LEFT, P1_RIGHT), (P2_LEFT, P2_RIGHT), (P3_LEFT, P3_RIGHT)]
+    body = [(None, P1_RIGHT), (P2_LEFT, P2_RIGHT), (P3_LEFT, P3_RIGHT)]
     for pno, (left, right) in enumerate(body):
         page = doc.new_page(width=530, height=800)
         _draw(page, 48, 45, [f"{180 + pno} A. Author"], 9.8)      # 러닝헤드
-        _draw(page, 48, 80, left, 8.0)
-        _draw(page, 285, 80, right, 8.0)
+        if pno == 0:                                               # 제목 + 문단 2개
+            _draw(page, 48, 80, P1_HEAD, 9.5)
+            _draw(page, 48, 105, P1_PARA1, 8.0, indent=8)
+            _draw(page, 48, 145, P1_PARA2, 8.0, indent=8)
+        else:
+            _draw(page, 48, 80, left, 8.0, indent=8)
+        _draw(page, 285, 80, right, 8.0, indent=8)
         if pno == 1:
             _draw(page, 285, 620, P2_NOTE, 6.5)                    # 각주
         _draw(page, 120, 750, ["This content downloaded on Tue, 01 Sep 2026"], 8.0)
@@ -94,6 +107,19 @@ def kordoc_adapter_degrades_gracefully():
         assert md and "INTRODUCTION" in md, (md or "")[:200]
     else:
         print("     (kordoc CLI 없음 — 폴백 경로만 검증)")
+
+
+@test
+def oracle_knows_paragraph_starts_and_sizes():
+    from post import build_oracle, key
+    doc = pymupdf.open(build_fixture())
+    o = build_oracle(doc)
+    assert key("The model is developed in this") in o.starts, "블록 첫 줄은 문단 시작이다"
+    assert key("section. Firms rely on communi-") not in o.starts, "이어지는 줄은 문단 시작이 아니다"
+    assert 7.5 < o.body_size < 8.5, o.body_size
+    assert o.sizes[key("1 See Nelson (1991) for a")] < o.body_size * 0.85, "각주는 작은 폰트다"
+    assert o.page_last[2], "페이지별 마지막 줄이 있어야 이미지를 그 자리에 넣는다"
+    doc.close()
 
 
 def main():

@@ -1,0 +1,6 @@
+work/
+output/
+input/*
+!input/sample.pdf
+!input/sample.docx
+__pycache__/

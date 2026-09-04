@@ -1,0 +1,7 @@
+pymupdf4llm>=0.0.20
+mammoth>=1.8
+markdownify>=0.13
+markdown>=3.6
+# 샘플 생성용(선택)
+python-docx
+matplotlib

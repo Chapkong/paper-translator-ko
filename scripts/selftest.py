@@ -84,6 +84,18 @@ def fixture_builds():
     doc.close()
 
 
+@test
+def kordoc_adapter_degrades_gracefully():
+    import kordoc
+    assert kordoc.to_markdown(ROOT / "input" / "없는파일.pdf") is None, \
+        "실패 시 예외가 아니라 None이어야 폴백할 수 있다"
+    if kordoc.available():          # CLI가 있는 환경에서만 본 검증
+        md = kordoc.to_markdown(build_fixture())
+        assert md and "INTRODUCTION" in md, (md or "")[:200]
+    else:
+        print("     (kordoc CLI 없음 — 폴백 경로만 검증)")
+
+
 def main():
     names = sys.argv[1:] or list(TESTS)
     unknown = [n for n in names if n not in TESTS]

@@ -194,6 +194,24 @@ def sanitize_removes_spaces():
     assert sanitize("Peteraf - 2026 - The Cornerstones") == "Peteraf_-_2026_-_The_Cornerstones"
 
 
+@test
+def postprocess_produces_clean_markdown():
+    from post import postprocess
+    doc = pymupdf.open(build_fixture())
+    # KorDocAI 출력 형태를 모사한다 — 한 줄이 한 문단, 머리글·바닥글은 이미 제거됨
+    kordoc_md = "\n\n".join(
+        ["## INTRODUCTION"] + P1_PARA1 + P1_PARA2 + P1_RIGHT
+        + P2_LEFT + P2_RIGHT + P2_NOTE + P3_LEFT + P3_RIGHT
+        + ["![image](image_001.png)"])
+    md, stats = postprocess(kordoc_md, doc, ROOT / "work" / "_fixture" / "images", "fixture")
+    assert "communication among their units." in md, md
+    assert "A second paragraph starts here and ends on this line." in md, md
+    assert "image_001.png" not in md, "KorDocAI 이미지 링크는 버려야 한다"
+    assert "> **각주 1** See Nelson" in md, md
+    assert stats["figures"] == 1 and stats["footnotes"] == 1, stats
+    doc.close()
+
+
 def main():
     names = sys.argv[1:] or list(TESTS)
     unknown = [n for n in names if n not in TESTS]

@@ -202,3 +202,21 @@ def insert_images(paras: list, by_page: dict, oracle) -> list:
         if k not in placed:
             out.extend(links)
     return out
+
+
+def postprocess(kordoc_md: str, doc, img_dir, stem: str):
+    """KorDocAI 출력을 번역 가능한 마크다운으로 다듬는다. 반환: (markdown, stats)"""
+    oracle = build_oracle(doc)
+    md = strip_kordoc_images(kordoc_md)
+    paras = rebuild_paragraphs(md, oracle)
+    paras, dropped = drop_cover(paras)
+
+    cover = 0 if any(COVER_PAT.search(u) for u in units(kordoc_md)[:60]) else None
+    picks = pick_images(doc, skip_pages=() if cover is None else (cover,))
+    by_page = save_images(doc, picks, img_dir, stem) if picks else {}
+
+    texts = mark_footnotes(paras, oracle)
+    texts = insert_images(texts, by_page, oracle)
+    n_notes = sum(1 for p in texts if p.startswith("> **각주"))
+    return "\n\n".join(texts) + "\n", {"dropped_chars": dropped,
+                                       "figures": len(picks), "footnotes": n_notes}

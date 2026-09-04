@@ -54,6 +54,13 @@ def build_oracle(doc) -> Oracle:
     return o
 
 
+FOOTNOTE_RATIO = 0.85
+
+COVER_PAT = re.compile(
+    r"jstor|accessibility support|terms and conditions|about\.jstor\.org"
+    r"|is collaborating with|not-for-profit|remediated|all use subject to", re.I)
+
+
 def units(md: str) -> list:
     """KorDocAI 출력은 PDF 한 줄이 한 문단이다. 빈 줄 기준으로 쪼갠다."""
     return [u.strip() for u in md.split("\n\n") if u.strip()]
@@ -86,3 +93,38 @@ def rebuild_paragraphs(md: str, oracle) -> list:
     if cur:
         paras.append((k0, cur))
     return paras
+
+
+def is_footnote(key0: str, oracle) -> bool:
+    size = oracle.sizes.get(key0)
+    if size is None or not oracle.body_size:     # 모르면 본문으로 둔다
+        return False
+    return size <= oracle.body_size * FOOTNOTE_RATIO
+
+
+def mark_footnotes(paras: list, oracle) -> list:
+    """각주 문단을 인용 블록으로 감싼다. 위치는 옮기지 않는다 —
+    KorDocAI가 이미 해당 페이지 본문 뒤에 번호순으로 모아뒀다."""
+    out = []
+    for k0, p in paras:
+        if not is_footnote(k0, oracle):
+            out.append(p)
+            continue
+        m = re.match(r"^(\d+)\s*(.*)$", p, re.S)
+        out.append(f"> **각주 {m.group(1)}** {m.group(2)}" if m else f"> **각주** {p}")
+    return out
+
+
+def drop_cover(paras: list, limit: int = 60):
+    """표지의 배너·약관 문단을 버린다. 서지 정보는 남는다.
+
+    KorDocAI가 반복 바닥글을 이미 지웠으므로 남은 JSTOR 문구는 표지에만 있다.
+    안전을 위해 문서 앞부분(limit개 문단)에서만 지운다.
+    """
+    kept, dropped = [], 0
+    for i, (k0, p) in enumerate(paras):
+        if i < limit and COVER_PAT.search(p):
+            dropped += len(p)
+        else:
+            kept.append((k0, p))
+    return kept, dropped

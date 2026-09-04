@@ -139,6 +139,28 @@ def paragraphs_and_hyphens_are_rebuilt():
     assert join_unit("", "first") == "first"
 
 
+@test
+def footnotes_marked_and_cover_dropped():
+    from post import mark_footnotes, drop_cover, is_footnote, Oracle, key
+    kn, kb = key("1 See Nelson (1991) for a"), key("Rents are bound to the firm")
+    o = Oracle(starts=set(), sizes={kn: 6.5, kb: 8.0}, body_size=8.0)
+    paras = [(kb, "Rents are bound to the firm under imperfect mobility."),
+             (kn, "1 See Nelson (1991) for a discussion of firm capabilities."),
+             ("모르는키", "폰트를 모르는 문단은 본문으로 둔다.")]
+    out = mark_footnotes(paras, o)
+    assert out[0] == "Rents are bound to the firm under imperfect mobility."
+    assert out[1] == "> **각주 1** See Nelson (1991) for a discussion of firm capabilities.", out[1]
+    assert not out[2].startswith(">"), "모르는 문단을 각주로 오판하면 안 된다"
+    assert is_footnote(kn, o) and not is_footnote(kb, o)
+
+    kept, dropped = drop_cover([("k1", "The Cornerstones of Competitive Advantage"),
+                                ("k2", "JSTOR is a not-for-profit service that helps scholars."),
+                                ("k3", "All use subject to https://about.jstor.org/terms"),
+                                ("k4", "본문 시작.")])
+    assert [p[1] for p in kept] == ["The Cornerstones of Competitive Advantage", "본문 시작."], kept
+    assert dropped > 0
+
+
 def main():
     names = sys.argv[1:] or list(TESTS)
     unknown = [n for n in names if n not in TESTS]

@@ -87,7 +87,8 @@ paper-translator/
 ### 4-1. 문서 추출 (적용함)
 | 후보 | 판단 |
 |---|---|
-| **PyMuPDF4LLM** ✅ 채택 | ML 모델 없이 CPU만으로 가장 빠름, `write_images=True`로 그림을 png로 뽑아 Markdown에 링크로 삽입. 디지털 PDF 논문에 최적. 의존성 최소 |
+| **KorDocAI CLI** ✅ 채택(2026-09-04) | `npx kordoc <pdf> --no-tables`. Peteraf 논문 실측 보존율 **0.972**(PyMuPDF4LLM 0.686), JSTOR 푸터·러닝헤드 자동 제거. 2단 읽기 순서를 정확히 복원한다. `--no-tables` 필수 — 기본값은 2단 테두리를 표로 오인한다 |
+| **PyMuPDF4LLM** ✅ 폴백으로 유지 | ML 모델 없이 CPU만으로 가장 빠름. 2단 조판에서 좌우 단이 섞여 문장이 절단되는 한계 확인. KorDocAI CLI가 없거나(오프라인) 실패할 때만 쓴다 |
 | Marker / MinerU / Docling | 레이아웃 인식은 더 좋지만 수 GB 모델·GPU 권장. 2단 레이아웃·스캔 PDF가 많아지면 **2단계에서 Marker로 교체** 검토 |
 | **mammoth + markdownify** ✅ 채택 (DOCX) | mammoth가 DOCX의 이미지·헤딩·표를 HTML로 뽑고 markdownify가 표를 Markdown 표로 변환. 순수 Python |
 
@@ -115,8 +116,17 @@ paper-translator/
 
 검증에서 얻은 교훈(이미 반영): 용어표에 `해외이주(유출)`처럼 대안 역어를 넣으면 번역문에 `해외이주(유출)(emigration)` 괄호 중첩이 생김 → 스킬에 "역어는 하나만, 병기는 한 쌍만" 규칙 추가.
 
-### 2단계 — 품질·규모 (다음 작업, 각 1~2시간)
-1. **실제 논문 5편 벤치마크**: 2단 레이아웃·긴 표·수식 많은 논문에서 extract 결과를 눈으로 검토. 깨지면 Marker(`pip install marker-pdf`)로 PDF 경로 교체(스크립트 인터페이스는 동일 유지)
+### 2단계 — 품질·규모 (2026-09-04 일부 완료)
+
+완료된 항목:
+- [x] **실제 논문 벤치마크**: Peteraf(SMJ, JSTOR 2단)에서 PyMuPDF4LLM 보존율 0.686 확인 → KorDocAI CLI로 교체(0.972)
+- [x] **verify.py 강화**: 이미지 파일 실존·숫자 집합·인용 집합·문단 수 검사 추가
+- [x] **컨텍스트 이월**: 청크 경계 문제를 `final-reviewer` 전문 통독 단계로 해결(직전 청크 첨부 방식보다 문서 전체를 본다)
+- [x] **손실 게이트**: 추출 품질 미달 시 번역 전 중단(`quality.py`)
+- [x] **결과물 판정**: `output-verifier`가 PASS/FAIL을 내리는 최종 관문 추가
+
+남은 항목:
+1. ~~**실제 논문 5편 벤치마크**~~ (1편 완료, 나머지 4편은 실사용하며 확인): 2단 레이아웃·긴 표·수식 많은 논문에서 extract 결과를 눈으로 검토. 깨지면 Marker(`pip install marker-pdf`)로 PDF 경로 교체(스크립트 인터페이스는 동일 유지)
 2. **humanizer 스킬 추가**: reviewer 에이전트 frontmatter `skills: academic-korean, humanizer`
 3. **컨텍스트 이월**: 청크 병렬 번역 시 경계 문장의 지시어("이 결과는…") 어색함 → translator 프롬프트에 직전 청크 마지막 문단을 참고용으로 첨부
 4. **비용 최적화**: translator 모델을 sonnet으로 내려 A/B → reviewer(opus)가 품질을 받쳐주는지 확인. 청크 크기 6,000 → 8,000자 실험

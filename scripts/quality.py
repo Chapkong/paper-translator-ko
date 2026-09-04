@@ -7,7 +7,9 @@ import re
 from dataclasses import dataclass
 
 MIN_COVERAGE = 0.97   # 문자 보존율 하한
-MAX_TRUNCATED = 0.03  # 잘린 문단 비율 상한
+MAX_TRUNCATED = 0.05  # 잘린 문단 비율 상한
+                      # Peteraf 회귀로 조정한 값이다. 정상 추출 0.037,
+                      # 좌우 단이 섞인 추출 0.145, 기존 경로 0.903 — 사이가 충분히 벌어진다.
 
 _STRIP = re.compile(r"[\s­\-]")
 _ENDINGS = tuple(".!?\"')]”’」』")

@@ -168,7 +168,13 @@ def build_oracle(doc) -> Oracle:
         # 제목은 문장 도중에 나오지 않는다는 맥락 조건을 함께 본다.
         context_ok = (prev is None or prev_heading
                       or prev["text"].rstrip().endswith(_SENT_END))
-        heading = bool(l.get("kind") != "table" and o.body_size and len(l["text"]) < 80
+        # 제목은 단 폭을 채우지 않는다. 이 조건이 없으면 줄바꿈된 본문 줄이
+        # 크기 흔들림만으로 제목이 되어 `## While only tradeable resources can be`
+        # 같은 가짜 제목이 생긴다.
+        col_width = right_edge - edge
+        short_line = col_width <= 0 or (l["x1"] - l["x0"]) < col_width * 0.7
+        heading = bool(l.get("kind") != "table" and o.body_size
+                       and len(l["text"]) < 80 and short_line
                        and (l["size"] >= o.body_size * HEADING_STRONG
                             or (l["size"] >= o.body_size * HEADING_MIN and context_ok)))
         indented = l["x0"] - edge >= INDENT_PT

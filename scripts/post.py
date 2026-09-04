@@ -23,15 +23,19 @@ class Oracle:
     page_last: dict = field(default_factory=dict) # 페이지 → 마지막 줄 키
 
 
+MARGIN = 0.08   # page_last를 고를 때 무시할 위·아래 여백 비율(머리글·바닥글 자리)
+
+
 def build_oracle(doc) -> Oracle:
     o = Oracle()
     all_sizes = []
     for pno in range(doc.page_count):
         last = ""
+        height = doc[pno].rect.height
         for b in doc[pno].get_text("dict")["blocks"]:
             if b.get("type") != 0:
                 continue
-            first = True
+            first, block_key = True, ""
             for ln in b["lines"]:
                 txt = "".join(sp["text"] for sp in ln["spans"]).strip()
                 if not txt:
@@ -41,13 +45,16 @@ def build_oracle(doc) -> Oracle:
                     continue
                 if first:
                     o.starts.add(k)
+                    block_key = k
                     first = False
                 sizes = [sp["size"] for sp in ln["spans"] if sp["size"] >= 2.0]
                 if sizes:
                     med = statistics.median(sizes)
                     o.sizes.setdefault(k, med)
                     all_sizes.append(med)
-                last = k
+            # 문단 매칭은 첫 줄 키로 한다. 머리글·바닥글은 KorDocAI가 지우므로 기준이 못 된다.
+            if block_key and height * MARGIN < b["bbox"][1] < height * (1 - MARGIN):
+                last = block_key
         if last:
             o.page_last[pno] = last
     o.body_size = statistics.median(all_sizes) if all_sizes else 0.0
@@ -128,3 +135,70 @@ def drop_cover(paras: list, limit: int = 60):
         else:
             kept.append((k0, p))
     return kept, dropped
+
+
+MIN_IMG_RATIO, MAX_IMG_RATIO = 0.03, 0.60
+
+
+def sanitize(stem: str) -> str:
+    """공백을 밑줄로 바꾼다. 경로에 공백이 있으면 이미지가 엉뚱한 폴더에 저장된다."""
+    return re.sub(r"\s+", "_", stem.strip())
+
+
+def strip_kordoc_images(md: str) -> str:
+    """KorDocAI가 남긴 이미지 링크는 전면 스캔 배경이므로 전부 버린다."""
+    keep = [u for u in md.split("\n\n") if not re.fullmatch(r"!\[[^\]]*\]\([^)]*\)", u.strip())]
+    return "\n\n".join(keep)
+
+
+def pick_images(doc, skip_pages=()) -> list:
+    """면적 3~60%이고 한 페이지에만 나오는 이미지만 고른다.
+
+    하한은 로고(실측 0.62%, 1.71%)를, 상한은 전면 스캔 배경(91.32%)을 걸러낸다.
+    """
+    pages_of = defaultdict(set)
+    cand = []
+    for pno in range(doc.page_count):
+        page = doc[pno]
+        area = page.rect.width * page.rect.height
+        for img in page.get_images(full=True):
+            xref = img[0]
+            for r in page.get_image_rects(xref):
+                pages_of[xref].add(pno)
+                cand.append((pno, xref, r, (r.width * r.height) / area))
+    out = []
+    for pno, xref, r, ratio in cand:
+        if pno in skip_pages or len(pages_of[xref]) > 1:
+            continue
+        if MIN_IMG_RATIO <= ratio <= MAX_IMG_RATIO:
+            out.append((pno, xref, r))
+    return out
+
+
+def save_images(doc, picks, img_dir, stem: str) -> dict:
+    img_dir.mkdir(parents=True, exist_ok=True)
+    by_page = defaultdict(list)
+    for i, (pno, xref, _r) in enumerate(picks, 1):
+        d = doc.extract_image(xref)
+        name = f"{sanitize(stem)}-p{pno + 1:03d}-{i:02d}.{d['ext']}"
+        (img_dir / name).write_bytes(d["image"])
+        by_page[pno].append(f"![](images/{name})")
+    return dict(by_page)
+
+
+def insert_images(paras: list, by_page: dict, oracle) -> list:
+    """이미지를 해당 페이지의 마지막 본문 문단 뒤에 넣는다."""
+    if not by_page:
+        return list(paras)
+    tail = {oracle.page_last.get(p): links for p, links in by_page.items() if oracle.page_last.get(p)}
+    out, placed = [], set()
+    for p in paras:
+        out.append(p)
+        for k, links in tail.items():
+            if k not in placed and k in key(p):
+                out.extend(links)
+                placed.add(k)
+    for k, links in tail.items():          # 자리를 못 찾은 이미지는 유실 대신 끝에 붙인다
+        if k not in placed:
+            out.extend(links)
+    return out

@@ -161,6 +161,39 @@ def footnotes_marked_and_cover_dropped():
     assert dropped > 0
 
 
+@test
+def only_real_figures_are_kept():
+    import shutil
+    from post import (pick_images, save_images, strip_kordoc_images,
+                      insert_images, build_oracle, key)
+    doc = pymupdf.open(build_fixture())
+    picks = pick_images(doc)
+    assert len(picks) == 1, f"그림 1개만 남아야 한다(로고 제외): {picks}"
+    assert picks[0][0] == 2, "3쪽의 그림이어야 한다"
+    out = ROOT / "work" / "_fixture" / "images"
+    if out.exists():
+        shutil.rmtree(out)
+    by_page = save_images(doc, picks, out, "fixture")
+    files = list(out.glob("*"))
+    assert len(files) == 1 and " " not in files[0].name, files
+    assert by_page[2][0].startswith("![](images/")
+
+    o = build_oracle(doc)
+    # 페이지 마지막 줄은 바닥글이 아니라 본문이어야 이미지가 제자리에 들어간다
+    assert o.page_last[2] == key("Implications for research are"), o.page_last[2]
+    paras = insert_images(["The final section applies the model to strategy formulation.",
+                           "Implications for research are discussed at the end."], by_page, o)
+    assert paras[-1].startswith("![](images/"), paras
+    assert strip_kordoc_images("본문\n\n![image](image_001.png)\n\n다음") == "본문\n\n다음"
+    doc.close()
+
+
+@test
+def sanitize_removes_spaces():
+    from post import sanitize
+    assert sanitize("Peteraf - 2026 - The Cornerstones") == "Peteraf_-_2026_-_The_Cornerstones"
+
+
 def main():
     names = sys.argv[1:] or list(TESTS)
     unknown = [n for n in names if n not in TESTS]

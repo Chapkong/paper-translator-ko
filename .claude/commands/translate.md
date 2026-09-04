@@ -16,6 +16,10 @@ python scripts/chunk.py work/STEM
 ```
 `chunks/index.json`을 읽어 청크 수 N, 그림 수를 보고한다.
 
+`extract.py`가 0이 아닌 코드로 끝나면 **번역 단계로 넘어가지 않는다.** 추출 품질 미달이라는 뜻이다.
+`work/STEM/extract_report.md`를 읽어 어느 문단이 잘렸는지 사용자에게 보고하고 멈춘다.
+깨진 원문을 번역하면 토큰만 쓰고 결과도 쓸 수 없다.
+
 ## 2. 용어표 — `glossary-builder` 서브에이전트 1회
 프롬프트: "work/STEM/source.md를 읽고 work/STEM/glossary.md를 작성하라."
 완료 후 glossary.md의 행 수를 보고한다.
@@ -39,15 +43,29 @@ FAIL 청크가 있으면 해당 청크만 translator를 재실행(실패 사유�
 python scripts/assemble.py work/STEM
 ```
 
-## 7. HTML 렌더링
+## 7. 전문 통독 — `final-reviewer` 서브에이전트 1회
+프롬프트: "output/STEM/STEM.ko.md 전문을 통독하고, 수정은 work/STEM/translated/NNN.md에 적용한 뒤 work/STEM/final_review.md에 보고하라."
+
+## 8. 재검증·재조립·HTML
 ```bash
+python scripts/verify.py work/STEM
+python scripts/assemble.py work/STEM
 python scripts/to_html.py output/STEM
 ```
-이미지가 base64로 내장된 단일 HTML(`output/STEM/STEM.html`)이 생성된다. 브라우저에서 바로 열거나 업로드해 볼 수 있다.
+이미지가 base64로 내장된 단일 HTML(`output/STEM/STEM.html`)이 생성된다.
 
-## 8. 최종 보고
+## 9. 결과물 검증 — `output-verifier` 서브에이전트
+프롬프트: "output/STEM/STEM.ko.md를 work/STEM/source.md와 대조해 판정하고 work/STEM/verdict.md에 기록하라."
+
+`verdict.md` 첫 줄이 `FAIL`이면 수정 지시에 적힌 청크만 `translator` 또는 `reviewer`로 되돌린 뒤
+`assemble.py` → `to_html.py` → `output-verifier`를 다시 실행한다. **최대 2회.**
+2회 후에도 FAIL이면 사유와 남은 문제를 사용자에게 보고하고 멈춘다. 통과했다고 보고하지 않는다.
+
+## 10. 최종 보고
 - 출력 경로 `output/STEM/STEM.ko.md`, HTML `output/STEM/STEM.html`, 그림 폴더 `output/STEM/images/`
-- 청크 수, 검수 수정 건수 합계(review/*.md에서 집계), REVISE가 많았던 청크 번호
-- 용어표 중 `?` 표시(확신 낮음) 항목이 있으면 사용자 확인 요청
+- `meta.json`의 추출기·보존율(`coverage`)·잘린 문단 비율(`truncated`), 청크 수
+- 검수 수정 건수 합계(review/*.md), 통독 수정 건수(final_review.md), `verdict.md` 판정
+- `final_review.md`의 **사용자 확인 요청 목록을 그대로 옮겨 적는다**
+- 용어 변경을 원하면 glossary 갱신 후 일괄 교체·재조립이 가능함을 안내한다
 
 주의: 그림(images/)은 어떤 단계에서도 수정·재생성하지 않는다. 번역 본문은 에이전트가 쓰고, 파일 이동·병합은 스크립트만 한다.

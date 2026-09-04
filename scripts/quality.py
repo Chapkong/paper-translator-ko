@@ -12,7 +12,9 @@ MAX_TRUNCATED = 0.05  # 잘린 문단 비율 상한
                       # 좌우 단이 섞인 추출 0.145, 기존 경로 0.903 — 사이가 충분히 벌어진다.
 
 _STRIP = re.compile(r"[\s­\-]")
-_ENDINGS = tuple(".!?\"')]”’」』")
+# 콜론·세미콜론도 문장 끝이다. 학술문에서 인용을 도입하는 문장이 콜론으로 끝난다
+# ("as he recalled:" → 인용 블록). 이걸 빼면 인용이 많은 논문에서 오탐이 쏟아진다.
+_ENDINGS = tuple(".!?:;\"')]”’」』")
 
 
 @dataclass
@@ -61,7 +63,8 @@ def checked_paragraphs(md: str) -> list:
         nxt = blocks[i + 1] if i + 1 < len(blocks) else ""
         if len(p) <= 80 or p.lstrip().startswith(("#", "|", ">", "!")):
             continue
-        if _SKIP_PARA.match(p) or nxt.startswith(">"):
+        # 각주(>)나 잘라낸 그림(!)이 뒤에 오면 구조적으로 끊긴 것이지 유실이 아니다
+        if _SKIP_PARA.match(p) or nxt.startswith((">", "!")):
             continue
         if _CHRONOLOGY.search(p):             # 연표 항목 (코드+날짜 포함)
             continue

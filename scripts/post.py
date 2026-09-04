@@ -321,6 +321,22 @@ def _repeated(doc, min_pages: int = 3):
     return set(hits), sum(hits.values())
 
 
+def region_chars(doc, regions_by_page: dict) -> int:
+    """그림·표 영역으로 잘라낸 텍스트의 문자 수.
+
+    이미지로 옮겼으므로 본문에 없는 것이 정상이다. 머리말·바닥글과 같이
+    손실 게이트의 분모에서 빼지 않으면 의도적 제거가 유실로 집계된다.
+    """
+    if not regions_by_page:
+        return 0
+    total = 0
+    for pno, regions in regions_by_page.items():
+        for l in page_lines(doc[pno]):
+            if figures.covers(regions, l):
+                total += quality.norm_len(l["text"])
+    return total
+
+
 def repeated_norms(doc, min_pages: int = 3) -> set:
     return _repeated(doc, min_pages)[0]
 
@@ -482,7 +498,8 @@ def postprocess(kordoc_md: str, doc, img_dir, stem: str):
     texts = insert_region_links(texts, regions_by_page)
     texts = insert_images(texts, by_page, oracle)
     n_notes = sum(1 for p in texts if p.startswith("> **각주"))
-    dropped += repeated_chars(doc)   # 지운 머리말·바닥글
+    dropped += repeated_chars(doc)                    # 지운 머리말·바닥글
+    dropped += region_chars(doc, regions_by_page)     # 이미지로 옮긴 그림·표 안 글자
     return "\n\n".join(texts) + "\n", {"dropped_chars": dropped,
                                        "figures": len(picks) + n_cropped,
                                        "footnotes": n_notes}

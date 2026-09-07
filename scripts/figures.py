@@ -61,12 +61,18 @@ _NUM_TOKEN = re.compile(r"^[\d.,%$/\[\]()·~-]+$")
 
 
 def _table_row(text: str) -> bool:
-    """수치·코드가 늘어선 표 행인가.
+    """수치·코드가 늘어선 표 행이거나 그림 칸 글자인가.
 
     `Miami-Ft. Lauderdale [12] 2.6 mil. 30.5% 1.01%`처럼 본문과 같은 크기·폭이라
     좌표만으로는 본문과 못 가른다. 스캔 텍스트는 셀이 한 스팬으로 합쳐져 나와
     줄 안 공백 간격도 쓸 수 없다(실측 전부 0). 남는 신호가 토큰 구성이다.
+
+    프로세스 그림의 매트릭스 칸은 수치가 적은 대신 칸마다 글머리표가 붙는다
+    (`* "Cellular went very * More confidence in * Articulation of`). 이 신호가
+    없으면 매트릭스 행이 본문으로 읽혀 영역이 아래쪽 일부만 잘린다(실측 p19 116pt).
     """
+    if text.count("*") >= 2 or "|" in text:
+        return True
     tokens = text.split()
     return sum(1 for t in tokens if _NUM_TOKEN.match(t)) >= 3
 

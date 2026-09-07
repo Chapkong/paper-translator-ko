@@ -100,7 +100,7 @@ paper-translator/
 | [DaleSeo/korean-skills](https://github.com/DaleSeo/korean-skills) `humanizer` | AI 한국어의 40개 패턴(번역투·어색한 띄어쓰기·어휘) 탐지 | **2단계 추가 권장**: `npx skills add daleseo/korean-skills@humanizer` → reviewer 에이전트 `skills:`에 추가 |
 | [snflkd/fluent-korean](https://github.com/snflkd/fluent-korean) | 조사 생략·전보문·어색한 은유 방지 output-style | 메인 세션 출력 문체용. 서브에이전트 산출물에는 직접 영향 없음 → 선택 |
 | [JangHyun-bin/korean-report-skills](https://github.com/JangHyun-bin/korean-report-skills) `korean-report-style` | 번역투 치환 규칙 115개, 어미 통일 | 규칙 표가 유용. 2단계에서 academic-korean 3절 표를 이 규칙으로 보강 |
-| **gaejosik-writing** (사용자 보유 스킬) | 개조식 보고서 문체 | 완역에는 사용 금지(명사형 종결은 완역 문체와 충돌). **3단계 "개조식 요약 부록" 옵션**에서 사용 |
+| **개조식 보고서 스킬** (사용자 보유) | 개조식 보고서 문체 | 완역에는 사용 금지(명사형 종결은 완역 문체와 충돌). **3단계 "개조식 요약 부록" 옵션**에서 사용 |
 
 ### 4-3. MCP
 번역 파이프라인 자체는 로컬 파일 입출력만 있어 **MCP가 필요 없다**(추가하면 오히려 의존성만 늘어남). 조사한 학술 MCP([academic-mcp](https://github.com/LinXueyuanStdio/academic-mcp), [academic-search](https://mcpservers.org/servers/afrise/academic-search-mcp-server), [awesome-mcp-korea](https://github.com/darjeeling/awesome-mcp-korea))는 "논문 검색·다운로드" 용도라 **3단계(arXiv/DOI로 바로 받아 번역)** 에서만 의미가 있다. 이미 연결된 PubMed MCP도 같은 위치에서 활용 가능.
@@ -148,7 +148,7 @@ paper-translator/
 6. **글로서리 사용자 확인 게이트**: `/translate --confirm-glossary` 옵션 → 용어표를 보여주고 승인 후 번역 진행
 
 ### 3단계 — 확장
-1. **개조식 요약 부록**: `/translate --summary` → 완역 후 gaejosik-writing 스킬로 □○-· 요약 1~2쪽 추가 (내부 회람용)
+1. **개조식 요약 부록**: `/translate --summary` → 완역 후 개조식 보고서 스킬로 □○-· 요약 1~2쪽 추가 (내부 회람용)
 2. **대조본 출력**: 문단 단위 영/한 나란히 보기 HTML (`assemble.py --bilingual`)
 3. **DOCX/HWP 변환**: pandoc으로 `.ko.md` → `.docx` (HWP는 docx 경유), 그림 임베드
 4. **입력 확장**: arXiv ID / DOI 입력 → academic-mcp 또는 PubMed MCP로 PDF 획득 → 파이프라인 진입

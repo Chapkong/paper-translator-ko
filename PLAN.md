@@ -140,7 +140,7 @@ paper-translator/
 - [x] **결과물 판정**: `output-verifier`가 PASS/FAIL을 내리는 최종 관문 추가
 
 남은 항목:
-1. ~~**실제 논문 5편 벤치마크**~~ (1편 완료, 나머지 4편은 실사용하며 확인): 2단 레이아웃·긴 표·수식 많은 논문에서 extract 결과를 눈으로 검토. 깨지면 Marker(`pip install marker-pdf`)로 PDF 경로 교체(스크립트 인터페이스는 동일 유지)
+1. ~~**실제 논문 5편 벤치마크**~~ (2편 완료 — Peteraf 1993, Noda·Bower 2007. 상세는 `docs/실측기록.md`. 나머지는 실사용하며 확인): 2단 레이아웃·긴 표·수식 많은 논문에서 extract 결과를 눈으로 검토. 깨지면 Marker(`pip install marker-pdf`)로 PDF 경로 교체(스크립트 인터페이스는 동일 유지)
 2. **humanizer 스킬 추가**: reviewer 에이전트 frontmatter `skills: academic-korean, humanizer`
 3. **컨텍스트 이월**: 청크 병렬 번역 시 경계 문장의 지시어("이 결과는…") 어색함 → translator 프롬프트에 직전 청크 마지막 문단을 참고용으로 첨부
 4. **비용 최적화**: translator 모델을 sonnet으로 내려 A/B → reviewer(opus)가 품질을 받쳐주는지 확인. 청크 크기 6,000 → 8,000자 실험

@@ -63,6 +63,10 @@ def check_citations(src: str, tr: str) -> list:
     return [f"missing citation ({a}, {y})" for a, y in sorted(missing)]
 
 
+# 소속기관 블록쿼트: "> 1 _Department..." 형태. 기관명은 원어 유지가 규칙이다.
+_AFFILIATION = re.compile(r"^>\s*\d+\s+_")
+
+
 def check_footnotes(tr: str) -> list:
     """각주가 영어 그대로 남았는지 본다.
 
@@ -73,6 +77,8 @@ def check_footnotes(tr: str) -> list:
     for p in tr.split("\n\n"):
         p = p.strip()
         if not p.startswith(">"):
+            continue
+        if _AFFILIATION.match(p):
             continue
         body = re.sub(r"^>\s*\*\*각주[^*]*\*\*\s*", "", p)
         # 서지 문자열만 있는 각주는 원문 유지가 규칙이다. 서술문이 있는데 한글이 없으면 미번역이다.
@@ -89,7 +95,7 @@ def check_paragraphs(src: str, tr: str) -> list:
 
 def main():
     wd = Path(sys.argv[1])
-    index = json.loads((wd / "chunks" / "index.json").read_text())
+    index = json.loads((wd / "chunks" / "index.json").read_text(encoding="utf-8"))
     fails = 0
     for e in index:
         src = (wd / "chunks" / e["id"]).read_text(encoding="utf-8")
@@ -110,7 +116,13 @@ def main():
         tt = sum(1 for l in tr.splitlines() if l.startswith("|"))
         if ts != tt:
             probs.append(f"table rows {ts}→{tt}")
+        # 헤딩이 있거나, 줄의 절반 이상이 참고문헌 항목(- [N])이면 참고문헌 청크
         is_refs = bool(re.search(r"^#+\s*(References|참고문헌)", src, re.M | re.I))
+        if not is_refs:
+            ref_lines = sum(1 for l in src.splitlines() if re.match(r"^-\s*\[", l))
+            all_lines = sum(1 for l in src.splitlines() if l.strip())
+            if all_lines > 0 and ref_lines / all_lines > 0.5:
+                is_refs = True
         r = hangul_ratio(tr)
         if not is_refs and r < 0.5:
             probs.append(f"hangul ratio {r:.2f} (untranslated?)")

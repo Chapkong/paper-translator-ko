@@ -26,6 +26,7 @@
 | Python 3.10+ | 파이프라인 스크립트 |
 | [Claude Code](https://claude.com/claude-code) CLI (로그인 상태) | 번역·검수 에이전트를 돌린다 |
 | Node.js (npx) | 추출 후보 중 하나인 KorDocAI CLI를 부른다 (선택 — 없으면 자체 경로만 쓴다) |
+| Edge 또는 Chrome | PDF 내려받기 (선택 — 없으면 HTML·MD만 받는다) |
 
 번역은 Claude 구독의 사용량을 쓴다. 별도 API 키는 필요 없다.
 
@@ -35,7 +36,7 @@
 git clone https://github.com/Chapkong/paper-translator-ko.git
 cd paper-translator-ko
 pip install -r requirements.txt
-python scripts/selftest.py        # 15개 자체 테스트가 모두 통과하면 준비 완료
+python scripts/selftest.py        # 자체 테스트가 모두 통과하면 준비 완료
 ```
 
 ## 사용법
@@ -44,7 +45,9 @@ python scripts/selftest.py        # 15개 자체 테스트가 모두 통과하�
 python app.py            # Windows에서는 논문번역기.bat 더블클릭
 ```
 
-브라우저에서 `http://localhost:8765`가 열린다. PDF를 끌어다 놓으면 번역이 시작되고, 끝나면 "번역본 보기"로 HTML을 연다.
+브라우저에서 `http://localhost:8765`가 열린다. PDF를 끌어다 놓으면 번역이 시작되고, 끝나면 **번역본 보기(HTML) · PDF 내려받기 · MD 내려받기** 중에서 고른다.
+
+PDF는 시스템에 설치된 Edge 또는 Chrome으로 굽는다(헤드리스 인쇄). HTML이 이미 A4 인쇄 CSS를 갖고 있어 화면과 같은 모양으로 나오고, 글자는 이미지가 아니라 선택·검색되는 텍스트다. 별도 설치가 필요 없다 — WeasyPrint는 윈도우에서 GTK 의존성이, Playwright는 크로미움 150MB 내려받기가 필요하다.
 
 논문 1편에 걸리는 시간은 분량에 비례한다. 실측으로 14쪽·5만 자(12청크) 약 40분, 35쪽·13만 자(29청크) 53분이었다. 대부분이 번역·검수에 쓰는 시간이라 추출을 아무리 빠르게 해도 줄지 않는다.
 

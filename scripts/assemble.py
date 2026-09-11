@@ -14,7 +14,7 @@ def main():
     ap.add_argument("--out", default="output")
     a = ap.parse_args()
     wd = Path(a.workdir)
-    index = json.loads((wd / "chunks" / "index.json").read_text())
+    index = json.loads((wd / "chunks" / "index.json").read_text(encoding="utf-8"))
     missing = [e["id"] for e in index if not (wd / "translated" / e["id"]).exists()]
     if missing:
         sys.exit(f"missing translations: {missing}")

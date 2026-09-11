@@ -192,6 +192,148 @@ def only_real_figures_are_kept():
     doc.close()
 
 
+WIDE = ROOT / "work" / "_fixture" / "wide.pdf"
+
+# 인용 블록 — 단 기준선보다 14pt 안팎 들여쓰되, 스캔본처럼 줄마다 x0가 흔들린다.
+# 실측 근거: Teece p29 Porter 인용문의 x0가 65.4~69.0으로 3.6pt 요동쳤다.
+Q_LEFT = ["Strategic fit among many activities is",
+          "fundamental not only to competitive",
+          "advantage but also to sustainability"]
+Q_LEFT_X = [62.0, 64.5, 61.5]        # 왼쪽 단 기준선 48 대비 +14.0 / +16.5 / +13.5
+Q_RIGHT = ["of that advantage. It is harder for",
+           "a rival to match an array of activities."]
+Q_RIGHT_X = [299.5, 301.0]           # 오른쪽 단 기준선 285 대비 +14.5 / +16.0
+
+# 전면 다이어그램 — 두 단에 걸치는데 캡션은 가운데 짧게 놓인다(Teece Figure 2와 같은 꼴).
+WIDE_LABEL_RIGHT = "Seizing Capability"
+WIDE_CAPTION = "Figure 1. A wide two-column diagram"
+
+
+def build_wide_fixture() -> Path:
+    """단을 넘어가는 인용 블록(1쪽)과 전면 다이어그램(2쪽)이 든 PDF."""
+    WIDE.parent.mkdir(parents=True, exist_ok=True)
+    doc = pymupdf.open()
+
+    page = doc.new_page(width=530, height=800)          # 1쪽 — 인용 블록
+    _draw(page, 48, 45, ["182 A. Author"], 9.8)
+    _draw(page, 48, 80, ["Porter states the point directly in his",
+                         "discussion of activity systems, which",
+                         "runs as follows."], 8.0, indent=8)
+    for i, (x, line) in enumerate(zip(Q_LEFT_X, Q_LEFT)):
+        _draw(page, x, 130 + i * 11, [line], 8.0)
+    for i, (x, line) in enumerate(zip(Q_RIGHT_X, Q_RIGHT)):
+        _draw(page, x, 80 + i * 11, [line], 8.0)
+    _draw(page, 285, 115, ["The argument resumes in this column",
+                           "after the quotation ends."], 8.0, indent=8)
+
+    page = doc.new_page(width=530, height=800)          # 2쪽 — 전면 다이어그램
+    _draw(page, 48, 45, ["183 A. Author"], 9.8)
+    _draw(page, 48, 80, ["The framework is summarized below",
+                         "in a single diagram that spans the",
+                         "full width of the printed page."], 8.0, indent=8)
+    _draw(page, 285, 80, ["The right column carries its own",
+                          "body text alongside the left one.",
+                          "Both columns run the whole page."], 8.0, indent=8)
+    page.draw_rect(pymupdf.Rect(60, 400, 470, 530), width=1.2)   # 두 단을 가로지르는 도형
+    _draw(page, 140, 440, ["Sensing Opportunities"], 7.0)        # 왼쪽 절반 라벨
+    _draw(page, 310, 440, [WIDE_LABEL_RIGHT], 7.0)               # 오른쪽 절반 라벨
+    _draw(page, 310, 470, ["Managing Threats"], 7.0)
+    _draw(page, 150, 550, [WIDE_CAPTION], 6.5)                   # 좁고 가운데 놓인 캡션
+
+    page = doc.new_page(width=530, height=800)          # 3쪽 — 스캔본 꼴(도형 좌표가 없다)
+    _draw(page, 48, 45, ["184 A. Author"], 9.8)
+    _draw(page, 48, 80, ["A scanned page keeps the diagram",
+                         "inside the page image, so no vector",
+                         "coordinates survive for it."], 8.0, indent=8)
+    _draw(page, 285, 80, ["Only the text layer remains, and the",
+                          "labels inside the diagram sit in it",
+                          "alongside the body of the article."], 8.0, indent=8)
+    _draw(page, 140, 440, ["Sensing Opportunities"], 7.0)        # 도형 없이 라벨만
+    _draw(page, 310, 440, [WIDE_LABEL_RIGHT], 7.0)
+    _draw(page, 310, 470, ["Managing Threats"], 7.0)
+    _draw(page, 150, 550, [WIDE_CAPTION], 6.5)
+    doc.save(WIDE)
+    doc.close()
+    return WIDE
+
+
+@test
+def quote_block_survives_jitter_and_column_break():
+    """인용 블록은 x0가 흔들려도, 단을 넘어가도 한 문단으로 이어져야 한다.
+
+    Teece 2007에서 이 두 가지가 깨져 인용문이 줄마다 쪼개졌고 단어 한가운데가
+    갈라졌다(`…change manage` / `ment. Although…`). 잘린 문단 비율 0.131의 절반이 여기서 나왔다.
+    """
+    from post import build_oracle, key
+    doc = pymupdf.open(build_wide_fixture())
+    o = build_oracle(doc)
+    keys = [k for k, _ in o.seq]
+    starts = [s for _, s in o.seq]
+
+    def at(text):
+        return starts[keys.index(key(text))]
+
+    assert at(Q_LEFT[0]), "인용문 첫 줄은 문단을 열어야 한다"
+    for n, line in enumerate(Q_LEFT[1:], 2):
+        assert not at(line), f"지터 때문에 인용문 {n}번째 줄이 새 문단을 열었다"
+    for n, line in enumerate(Q_RIGHT, 1):
+        assert not at(line), f"단 경계를 넘자 인용문 {n}번째 줄이 새 문단을 열었다"
+    doc.close()
+
+
+@test
+def wide_figure_region_covers_whole_diagram():
+    """전면 다이어그램은 캡션이 좁아도 전체가 잘려야 한다.
+
+    캡션이 속한 단으로 폭을 정하면 그림의 반대쪽 절반이 본문으로 샌다.
+    Teece p17 실측: 크롭 x 38~377, 라벨 실제 x 332~455 — 오른쪽 절반이 본문에 유입됐다.
+    """
+    import figures
+    from post import page_lines, build_oracle
+    doc = pymupdf.open(build_wide_fixture())
+    body = build_oracle(doc).body_size
+    # 2쪽은 도형 좌표가 있는 조판, 3쪽은 도형이 없는 스캔본 꼴 — 신호가 다르니 둘 다 본다
+    for pno, kind in ((1, "벡터 조판"), (2, "스캔본")):
+        page = doc[pno]
+        lines = page_lines(page)
+        regions = figures.plan(page, lines, body, pno)
+        assert regions, f"{kind}: 전면 다이어그램에서 잘라낼 영역을 찾지 못했다"
+
+        right = next(l for l in lines if WIDE_LABEL_RIGHT in l["text"])
+        assert figures.covers(regions, right), (
+            f"{kind}: 그림 오른쪽 절반이 영역 밖이다 — 라벨 "
+            f"x{right['x0']:.0f}~{right['x1']:.0f}, "
+            f"영역 {[(round(r['rect'][0]), round(r['rect'][2])) for r in regions]}")
+        # 본문이나 캡션까지 삼키면 반대 방향 손상이다
+        for l in lines:
+            if l["size"] >= 7.5 or WIDE_CAPTION in l["text"]:
+                assert not figures.covers(regions, l), \
+                    f"{kind}: 그림이 아닌 줄이 영역에 삼켜졌다: {l['text']!r}"
+    doc.close()
+
+
+@test
+def scan_debris_is_not_a_heading():
+    """스캔 잔재는 제목이 될 수 없고, 진짜 제목은 통과해야 한다.
+
+    잔재가 제목으로 승격되면 문단 한가운데에 끼어 문장을 가른다
+    (Teece 실측: `…as routines and` / `## il` / 이어지는 본문).
+    """
+    from post import is_page_number, looks_like_text
+    for t in ["ENTERPRISE PERFORMANCE", "DAVID J. TEECE*", "3. METHODS",
+              "Nature", "그림 개요", "표 1 요약"]:
+        assert looks_like_text(t), f"진짜 제목을 잔재로 버렸다: {t!r}"
+    for t in ["il", "* lnf?rSc??Tic??", "?S.SZ o .2", "Isl11?", "C0 g", "MA.", "1350", ""]:
+        assert not looks_like_text(t), f"스캔 잔재가 제목이 됐다: {t!r}"
+
+    # 위·아래 여백에 홀로 놓인 숫자는 쪽 번호다 — 쪽마다 값이 달라 반복 판정으로는 못 잡는다
+    h = 800.0
+    assert is_page_number({"text": "1342", "y0": 40.0}, h)
+    assert is_page_number({"text": "1342", "y0": 780.0}, h)
+    assert not is_page_number({"text": "1342", "y0": 400.0}, h), "본문 한가운데 숫자는 쪽 번호가 아니다"
+    assert not is_page_number({"text": "1342 D. J. Teece", "y0": 40.0}, h)
+
+
 @test
 def sanitize_removes_spaces():
     from post import sanitize
@@ -342,6 +484,290 @@ def final_check_catches_untranslated_footnotes():
     rows = collect(work, out)
     note_row = next(r for r in rows if r[0] == "미번역 각주")
     assert not note_row[3], "영어로 남은 각주를 잡아야 한다"
+
+
+@test
+def running_head_glued_to_body_is_stripped():
+    """kordoc 본문에 남은 러닝헤드를 지운다 — 단독이면 문단째, 붙어 있으면 앞부분만.
+
+    When Does(2026) 실측: 워터마크 `Preprint not peer reviewed`가 40번 나오고 38번이
+    제목(`#`)으로 잡혔다. ordered_lines()는 정답지에서만 러닝헤드를 빼므로 kordoc
+    마크다운에는 그대로 남아 페이지 경계마다 문단을 갈랐다(잘린 문단 0.198).
+    repeated_chars()가 글자 수를 이미 분모에서 빼기 때문에 보존율도 1.057로 튀었다.
+    """
+    from post import strip_running_heads, repeat_norm
+    repeated = {repeat_norm("Preprint not peer reviewed")}
+    paras = [(0, "# Preprint not peer reviewed"),
+             (1, "# Preprint not peer reviewed define causal states as minimal representations."),
+             (2, "이 문단은 손대지 않는다."),
+             (3, "## 진짜 제목은 남는다")]
+    out = [t for _, t in strip_running_heads(paras, repeated)]
+    assert out == ["define causal states as minimal representations.",
+                   "이 문단은 손대지 않는다.",
+                   "## 진짜 제목은 남는다"], out
+
+
+HEAD_SIZE_FIXTURE = ROOT / "work" / "_fixture" / "heading_size.pdf"
+
+
+def build_heading_size_fixture() -> Path:
+    """본문 크기가 두 값으로 갈린 한 쪽 PDF.
+
+    When Does(2026) 실측 재현: 본문 10.91이 821줄, 11.96이 275줄이다. 11.96은
+    중앙값의 1.096배로 HEADING_MIN(1.08)을 넘지만 BODY_HI(1.12) 안에 있다.
+    이 겹치는 구간 때문에, 문장이 끝난 직후에 오는 짧은 본문 조각이 제목으로
+    오인됐다(`## tion.`, `## more productive.` 등 11건).
+    """
+    HEAD_SIZE_FIXTURE.parent.mkdir(parents=True, exist_ok=True)
+    doc = pymupdf.open()
+    page = doc.new_page(width=530, height=800)
+    body = [f"Body line {i} runs the full width of this column and ends here."
+            for i in range(18)]
+    _draw(page, 48, 60, body, 10.9)
+    _draw(page, 48, 60 + 18 * 14, ["tion of the argument."], 11.96)
+    _draw(page, 48, 60 + 20 * 14, ["A Real Section Heading"], 17.0)
+    doc.save(HEAD_SIZE_FIXTURE)
+    doc.close()
+    return HEAD_SIZE_FIXTURE
+
+
+@test
+def body_size_line_is_not_a_heading():
+    """본문 크기 범위 안의 줄은 제목이 아니다.
+
+    문장이 끝난 직후에 오는 짧은 줄은 맥락 조건을 통과하므로, 크기 조건만으로는
+    이어지는 본문 조각을 막을 수 없다. figures.body_band가 본문으로 인정하는
+    범위 밖일 때만 제목으로 본다.
+    """
+    from post import build_oracle, key
+    doc = pymupdf.open(build_heading_size_fixture())
+    o = build_oracle(doc)
+    assert key("A Real Section Heading") in o.headings, "진짜 제목은 제목으로 남아야 한다"
+    assert key("tion of the argument.") not in o.headings,         "본문 크기(1.096배, 본문 범위 안)인 줄이 제목으로 잡혔다"
+    doc.close()
+
+
+@test
+def three_piece_paragraph_is_fully_merged():
+    """세 조각으로 갈린 문단은 끝까지 이어야 한다.
+
+    When Does(2026) 실측: 문단이 페이지를 두 번 넘어 세 조각이 됐다. 기존 코드는
+    한 번 이은 뒤 결과를 다시 보지 않고 넘어가, 이어붙인 문단이 그대로 문장
+    중간에서 끊긴 채 남았다(잘린 문단 27건 중 이어짐 12건이 이것이다).
+    """
+    from post import merge_continuations
+    got = merge_continuations([
+        "This sentence begins the paragraph and runs to the end of the page where it is tra-",
+        "nslated into a second piece that also fails to close the sentence and ends with",
+        "the final piece that closes it properly.",
+        "A new paragraph starts here.",
+    ])
+    assert got == [
+        "This sentence begins the paragraph and runs to the end of the page where it is "
+        "translated into a second piece that also fails to close the sentence and ends "
+        "with the final piece that closes it properly.",
+        "A new paragraph starts here.",
+    ], got
+
+
+@test
+def math_font_ratio_counts_only_math_spans():
+    """줄에서 수학 폰트가 차지하는 문자 비율. 수식 탐지의 필수 신호다.
+
+    When Does·Yin 모두 TeX 조판이라 수식이 CMMI/CMSY/CMR로 조판된다. 본문
+    (NimbusRomNo9L-Regu)과 폰트로 갈리므로 좌표보다 확실한 신호다.
+    """
+    from post import _math_ratio
+    assert _math_ratio([{"text": "abcd", "font": "NimbusRomNo9L-Regu"},
+                        {"text": "xy", "font": "CMMI10"}]) == 2 / 6
+    assert _math_ratio([{"text": "plaintext", "font": "NimbusRomNo9L-Regu"}]) == 0.0
+    assert _math_ratio([{"text": "ab", "font": "CMSY10"}]) == 1.0
+    assert _math_ratio([]) == 0.0
+
+
+@test
+def display_equation_is_a_region_but_inline_math_is_not():
+    """독립 수식 줄만 영역으로 잡는다. 인라인 수식은 건드리지 않는다.
+
+    본문을 이미지로 삼키면 번역이 불가능해지고 보존율 분모가 왜곡된다.
+    수학 폰트 비율(필수)과 좁은 줄 폭(보조)을 함께 본다.
+    """
+    from figures import is_display_equation
+    col_x0, col_x1 = 58.0, 528.0
+    eq = {"x0": 200.0, "x1": 320.0, "math": 0.8, "text": "A = B + C"}
+    assert is_display_equation(eq, col_x0, col_x1), "가운데 조판된 수식 줄"
+    full = {"x0": 60.0, "x1": 520.0, "math": 0.12,
+            "text": "The model where x = y holds throughout the corpus."}
+    assert not is_display_equation(full, col_x0, col_x1), "단 폭을 채운 본문의 인라인 수식"
+    prose = {"x0": 60.0, "x1": 200.0, "math": 0.0, "text": "A short prose line."}
+    assert not is_display_equation(prose, col_x0, col_x1), "수학 폰트가 없으면 수식이 아니다"
+
+
+@test
+def equation_image_goes_after_the_paragraph_above_it():
+    """수식 이미지는 바로 위 문단 뒤에 들어간다.
+
+    캡션이 없어 캡션 앵커를 쓸 수 없고, 페이지 단위 배치는 위치를 잃는다.
+    영역에 기록한 '바로 위 본문 줄'을 품은 문단을 찾아 그 뒤에 넣는다.
+    """
+    from post import insert_equation_links
+    regions = {2: [{"kind": "equation", "after_text": "can, therefore, be formulated as",
+                    "link": "![](images/eq-p003-01.png)"},
+                   # 캡션이 붙은 그림 영역은 이 함수가 건드리지 않는다
+                   {"cap_text": "Figure 1. Something", "link": "![](images/fig-p003-02.png)"}]}
+    texts = ["The performance score of the n-th attempt can, therefore, be formulated as",
+             "Our model formalizes a minimal two-channel search mechanism."]
+    got = insert_equation_links(texts, regions)
+    assert got == [texts[0], "![](images/eq-p003-01.png)", texts[1]], got
+
+
+@test
+def equation_fragments_are_not_cropped():
+    """수학 폰트 조각은 수식 영역이 아니다. 연산자나 수식 번호가 있어야 수식이다.
+
+    When Does 실측: math>=0.3인 줄 115개 중 88개가 공백 뺀 6자 미만 조각(마침표
+    하나 등)이었다. 이것까지 잘라내 영역이 51개가 되자 본문에서 글자가 빠지고
+    잘린 문단 비율이 0.071에서 0.089로 오히려 나빠졌다.
+    """
+    from figures import _equation_regions
+    lines = [
+        {"x0": 60.0, "x1": 520.0, "y0": 100.0, "y1": 112.0, "math": 0.0,
+         "text": "The reduced-form extension of the idea-production function is"},
+        {"x0": 250.0, "x1": 330.0, "y0": 130.0, "y1": 142.0, "math": 0.9,
+         "text": "˙At = θSη"},
+        {"x0": 300.0, "x1": 304.0, "y0": 300.0, "y1": 312.0, "math": 1.0, "text": "."},
+    ]
+    got = _equation_regions(lines, 560.0, 5, [])
+    assert len(got) == 1, got
+    assert got[0]["kind"] == "equation", got[0]
+    assert got[0]["after_text"].startswith("The reduced-form"), got[0]
+
+
+@test
+def whole_math_blocks_leave_the_body_text():
+    """통째로 수식인 문단은 본문에서 빠진다. 인라인 수식이 든 본문은 남는다.
+
+    kordoc은 수식을 잘게 조각내 독립 문단으로 내놓는다(When Does 실측: 단위
+    1253개 중 75개). 이 조각이 본문 문단 사이에 끼어 문단을 갈랐다. PDF 쪽
+    영역(14개)과 개수가 어긋나 1:1로 지울 수 없으므로 텍스트 쪽에서 판정한다.
+    """
+    from post import drop_math_blocks
+    paras = [(0, "The reduced-form extension of the idea-production function is"),
+             (1, "A˙ = θ Sη Aφ0+φ1E f t.	(6)"),
+             (2, "# ∑"),
+             (3, "Every part of this equation has a separate interpretation, where x = y holds."),
+             (4, "## 진짜 제목은 남는다")]
+    kept, chars = drop_math_blocks(paras)
+    assert [t for _, t in kept] == [paras[0][1], paras[3][1], paras[4][1]], kept
+    assert chars > 0, chars
+
+
+@test
+def arrow_led_fragment_is_a_continuation():
+    """화살표·연산자로 시작하는 줄은 문장을 열 수 없다 — 앞 문단에서 이어진 것이다.
+
+    When Does 실측: `−→ coherent stop–start wave.`, `−→ laboratory and researcher
+    incentives`가 소문자 조건에 걸려 병합되지 않아 앞 문단이 잘린 채 남았다.
+    """
+    from post import merge_continuations
+    got = merge_continuations([
+        "The example traces local braking then propagation across neighbouring vehicles",
+        "−→ coherent stop–start wave.",
+        "A new paragraph starts here and is left alone.",
+    ])
+    assert len(got) == 2, got
+    assert got[0].endswith("coherent stop–start wave."), got[0]
+
+    # 여는 인용부호 뒤가 소문자면 문장 도중이다
+    quoted = merge_continuations([
+        "This prevents a researcher from obtaining a favourable",
+        "“emergence score” by combining several weak signals.",
+    ])
+    assert len(quoted) == 1, quoted
+    # 인용으로 문단을 열 때는 안쪽이 대문자다 — 붙이지 않는다
+    opening = merge_continuations([
+        "The author closes the argument without a full stop here",
+        "“Evidence for change is what matters,” he wrote later.",
+    ])
+    assert len(opening) == 2, opening
+
+
+@test
+def math_dominant_table_region_is_an_equation():
+    """표로 잡힌 영역이 수식 조판이면 수식으로 되돌린다.
+
+    Yin(2026)의 큰 시그마는 2차원으로 조판돼 `xn =`, `B`, `X`, `b=1` 같은 조각으로
+    흩어진다. pymupdf의 find_tables가 이 격자를 표로 먼저 claim해 수식 탐지가
+    닿지 못했고(문서 전체에서 수식 영역이 2개만 잡혔다), 그래서 문단이
+    `…be formulated as`에서 끊긴 채 이미지도 놓이지 않았다.
+    """
+    from figures import _math_dominant
+    rect = (200.0, 600.0, 330.0, 660.0)
+    equation = [{"x0": 210.0, "x1": 240.0, "y0": 620.0, "y1": 632.0, "math": 1.0,
+                 "text": "xn ="},
+                {"x0": 250.0, "x1": 266.0, "y0": 629.0, "y1": 641.0, "math": 1.0,
+                 "text": "wbx(b)"},
+                {"x0": 250.0, "x1": 264.0, "y0": 647.0, "y1": 659.0, "math": 0.4,
+                 "text": "b=1"}]
+    assert _math_dominant(equation, rect), "수식 조판이면 수식 영역이다"
+
+    real_table = [{"x0": 210.0, "x1": 300.0, "y0": 620.0, "y1": 632.0, "math": 0.0,
+                   "text": "Region North South Total"},
+                  {"x0": 210.0, "x1": 300.0, "y0": 640.0, "y1": 652.0, "math": 0.0,
+                   "text": "Sales 120 340 460"}]
+    assert not _math_dominant(real_table, rect), "진짜 표는 표로 남는다"
+    assert not _math_dominant([], rect), "빈 영역은 수식이 아니다"
+
+
+@test
+def equation_anchor_is_the_line_above_in_the_same_column():
+    """수식이 오른쪽으로 밀려 조판돼도 도입 문장을 앵커로 잡는다.
+
+    Yin(2026) 실측: 수식 영역은 x 280~354인데 도입 문장은 x 72~267에서 끝난다.
+    가로 겹침을 요구하면 이 문장이 후보에서 탈락하고 엉뚱한 윗줄이 앵커가 되어,
+    수식 이미지가 다른 문단 뒤로 갔다. 문단은 `…be formulated as`에서 끊긴 채
+    남아 게이트를 막았다(0.062). 겹침이 아니라 같은 단인지를 본다.
+    """
+    from figures import _anchor_above
+    lines = [
+        {"x0": 72.0, "x1": 538.0, "y0": 575.0, "y1": 589.0, "math": 0.0,
+         "text": "The overall performance score of the solution is a weighted sum."},
+        {"x0": 72.0, "x1": 267.0, "y0": 596.0, "y1": 608.0, "math": 0.0,
+         "text": "n-th attempt can, therefore, be formulated as"},
+        {"x0": 294.0, "x1": 340.0, "y0": 629.0, "y1": 641.0, "math": 1.0,
+         "text": "wbx(b)"},
+    ]
+    got = _anchor_above(lines, (280.0, 625.0, 354.0, 659.0), 595.0)
+    assert got.endswith("be formulated as"), repr(got)
+
+
+@test
+def pdf_export_works_or_degrades():
+    import shutil
+    import to_pdf
+    out = ROOT / "work" / "_fixture"
+    out.mkdir(parents=True, exist_ok=True)
+    html, pdf = out / "pdf_test.html", out / "pdf_test.pdf"
+    html.write_text("<html><head><meta charset='utf-8'><title>t</title></head>"
+                    "<body><h1>한글 제목</h1><p>본문 문단이다.</p></body></html>",
+                    encoding="utf-8")
+    pdf.unlink(missing_ok=True)
+    if not to_pdf.find_browser():
+        print("     (Edge·Chrome 없음 — 실패해도 예외를 던지지 않는지만 확인)")
+        assert to_pdf.html_to_pdf(html, pdf) is False
+        return
+    assert to_pdf.html_to_pdf(html, pdf), "브라우저가 있으면 PDF가 나와야 한다"
+    assert pdf.exists() and pdf.stat().st_size > 0
+    doc = pymupdf.open(pdf)
+    assert "한글 제목" in doc[0].get_text(), doc[0].get_text()[:100]
+    doc.close()
+    # 없는 폴더는 만들어서 쓴다
+    nested = out / "_pdf_nested" / "x.pdf"
+    shutil.rmtree(nested.parent, ignore_errors=True)
+    assert to_pdf.html_to_pdf(html, nested) and nested.exists()
+    shutil.rmtree(nested.parent, ignore_errors=True)
+    # 없는 HTML은 예외 없이 False
+    assert to_pdf.html_to_pdf(out / "없는파일.html", pdf) is False
 
 
 def main():

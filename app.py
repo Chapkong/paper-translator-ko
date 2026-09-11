@@ -14,6 +14,7 @@ from flask import Flask, abort, jsonify, request, send_file
 ROOT = Path(__file__).parent.resolve()
 sys.path.insert(0, str(ROOT / "scripts"))
 from post import work_stem          # 작업 폴더 이름 규칙은 scripts/post.py 한 곳에만 둔다
+import to_pdf                       # 결과물을 PDF로 굽는다(브라우저 헤드리스 인쇄)
 INPUT, WORK, OUTPUT = ROOT / "input", ROOT / "work", ROOT / "output"
 ALLOWED = {".pdf", ".docx"}
 PORT = 8765
@@ -130,7 +131,10 @@ def retry(stem):
     stem = safe_stem(stem)
     if stem in procs and procs[stem].poll() is None:
         return jsonify({"error": "이미 번역 중입니다"}), 409
-    match = [f for f in INPUT.iterdir() if f.stem == stem and f.suffix.lower() in ALLOWED]
+    # UI가 넘기는 stem은 work_stem()으로 정규화된 이름이다. 원본 파일명과 그대로 비교하면
+    # 공백이 든 파일은 영영 못 찾는다. 정렬해서 list_jobs()가 고른 원본과 같은 것을 집는다.
+    match = sorted(f for f in INPUT.iterdir()
+                   if work_stem(f.stem) == stem and f.suffix.lower() in ALLOWED)
     if not match:
         return jsonify({"error": "input/에 원본 파일이 없습니다"}), 404
     start_translation(match[0].name)
@@ -143,6 +147,24 @@ def view(stem):
     if not p.exists():
         abort(404)
     return send_file(p)
+
+
+@app.get("/pdf/<stem>")
+def pdf(stem):
+    """PDF를 내려받는다. 없거나 HTML보다 오래됐으면 그때 굽는다(10초 안팎).
+
+    미리 굽지 않는 이유: 매 실행마다 굽는 건 낭비고, 사용자가 PDF를 받을 때만 필요하다.
+    """
+    stem = safe_stem(stem)
+    html = OUTPUT / stem / f"{stem}.html"
+    target = OUTPUT / stem / f"{stem}.pdf"
+    if not html.exists():
+        abort(404)
+    stale = not target.exists() or target.stat().st_mtime < html.stat().st_mtime
+    if stale and not to_pdf.html_to_pdf(html, target):
+        return ("PDF를 만들 수 없습니다. Edge 또는 Chrome이 필요합니다 — "
+                "'번역본 보기'로 연 뒤 Ctrl+P → 'PDF로 저장'으로도 받을 수 있습니다."), 501
+    return send_file(target, as_attachment=True)
 
 
 @app.get("/md/<stem>")
@@ -246,6 +268,7 @@ function render(jobs) {
     let btns = '';
     if (j.status === 'done')
       btns = `<a class="primary" href="/view/${s}" target="_blank">번역본 보기</a>
+              <a href="/pdf/${s}" onclick="this.textContent='PDF 굽는 중…'">PDF 내려받기</a>
               <a href="/md/${s}">MD 내려받기</a>
               <button onclick="retry('${j.stem.replace(/'/g,"\\\\'")}')">다시 번역</button>`;
     else if (j.status === 'failed')
@@ -253,6 +276,8 @@ function render(jobs) {
               <button onclick="retry('${j.stem.replace(/'/g,"\\\\'")}')">다시 시도</button>`;
     else if (j.status === 'running')
       btns = `<a href="/log/${s}" target="_blank">로그 보기</a>`;
+    else if (j.status === 'uploaded')
+      btns = `<button onclick="retry('${j.stem.replace(/'/g,"\\\\'")}')">번역 시작</button>`;
     return `<div class="job">
       <div class="top">
         <span class="name">${j.stem}</span>

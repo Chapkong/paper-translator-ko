@@ -187,6 +187,34 @@ def clean(md: str) -> str:
     return md.strip() + "\n"
 
 
+def add_equation_images(md: str, src, outdir) -> str:
+    """레거시 경로(pymupdf4llm) 결과에 수식 영역 이미지를 끼워 넣는다.
+
+    pymupdf4llm은 디스플레이 수식을 아예 빠뜨린다(Yin 2026 실측: 문단이
+    `…can, therefore, be formulated as`에서 닫히고 수식 없이 다른 산문이 온다).
+    영역 이미지를 그 자리에 넣으면 사람이 수식을 볼 수 있고,
+    quality.checked_paragraphs가 이미지 앞 문단을 절단 검사에서 뺀다.
+
+    영역 탐지·배치는 postprocess 경로와 같은 함수를 쓴다 — 규칙을 두 벌 두지 않는다.
+    """
+    import pymupdf, post, figures
+
+    doc = pymupdf.open(str(src))
+    try:
+        _lines, _body, regions = post.ordered_lines(doc)
+        eq = {pno: [r for r in rs if r.get("kind") == "equation"]
+              for pno, rs in regions.items()}
+        eq = {pno: rs for pno, rs in eq.items() if rs}
+        if not eq:
+            return md
+        figures.render(doc, eq, outdir / "images")
+    finally:
+        doc.close()
+    blank = chr(10) * 2
+    blocks = [b for b in md.split(blank) if b.strip()]
+    return blank.join(post.insert_equation_links(blocks, eq))
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("src")
@@ -211,6 +239,7 @@ def main():
             shutil.rmtree(outdir / "images", ignore_errors=True)
             md2 = clean(extract_pdf_legacy(src, outdir))
             md2, dropped2 = stitch_pages(md2)
+            md2 = add_equation_images(md2, src, outdir)
             s2 = quality.score(md2, raw_text, dropped2)
             print(f"  후보 pymupdf4llm: 보존율 {s2.coverage:.3f}, 잘린 문단 {s2.truncated:.3f}")
             if s is None or quality.better(s, s2):
